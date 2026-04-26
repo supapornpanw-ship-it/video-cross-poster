@@ -82,6 +82,22 @@ async function bgUploadStory(page, blob) {
   return { id: video_id };
 }
 
+// ───────── Toolbar icon click — open the web app
+const APP_URL = 'https://video-cross-poster.vercel.app/';
+
+chrome.action.onClicked.addListener(async () => {
+  // If a tab with the app is already open, focus it; otherwise open a new tab.
+  try {
+    const tabs = await chrome.tabs.query({ url: APP_URL + '*' });
+    if (tabs && tabs[0]) {
+      await chrome.tabs.update(tabs[0].id, { active: true });
+      await chrome.windows.update(tabs[0].windowId, { focused: true });
+      return;
+    }
+  } catch (_) {}
+  await chrome.tabs.create({ url: APP_URL });
+});
+
 // ───────── Alarm handler — fires when scheduled story time arrives
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (!alarm || !alarm.name || !alarm.name.startsWith('story_')) return;

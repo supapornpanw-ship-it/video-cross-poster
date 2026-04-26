@@ -3,7 +3,7 @@
   "name": "Video Cross-Poster (FB + YT)",
   "version": "1.0.0",
   "description": "Post a video to multiple Facebook pages and one YouTube channel in one click.",
-  "permissions": ["storage", "alarms", "unlimitedStorage"],
+  "permissions": ["storage", "alarms", "unlimitedStorage", "tabs"],
   "host_permissions": [
     "https://graph.facebook.com/*",
     "https://graph-video.facebook.com/*",
@@ -23,6 +23,6 @@
     }
   ],
   "action": {
-    "default_title": "Video Cross-Poster"
+    "default_title": "Video Cross-Poster — เปิดเว็บแอป"
   }
 }
