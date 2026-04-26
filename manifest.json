@@ -3,10 +3,11 @@
   "name": "Video Cross-Poster (FB + YT)",
   "version": "1.0.0",
   "description": "Post a video to multiple Facebook pages and one YouTube channel in one click.",
-  "permissions": ["storage", "alarms"],
+  "permissions": ["storage", "alarms", "unlimitedStorage"],
   "host_permissions": [
     "https://graph.facebook.com/*",
     "https://graph-video.facebook.com/*",
+    "https://rupload.facebook.com/*",
     "https://www.googleapis.com/*",
     "https://oauth2.googleapis.com/*",
     "https://accounts.google.com/*",

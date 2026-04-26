@@ -32,6 +32,14 @@
   };
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const uid = () => 'j_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  function fileToDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error('file_read_failed'));
+      r.readAsDataURL(file);
+    });
+  }
 
   // ───────── Extension bridge
   const pending = new Map();
@@ -595,9 +603,12 @@
     state.uploading = true;
     $('postBtn').disabled = true;
 
+    // When scheduled + story enabled, group all stories into ONE scheduled item
+    // (background uploads them all when alarm fires, sharing the stored blob).
     const items = [
       ...pages.map(p => ({ label: `Facebook Feed · ${p.name}`, kind: 'fb', page: p })),
-      ...(storyEnable ? pages.map(p => ({ label: `Facebook Story · ${p.name}`, kind: 'story', page: p })) : []),
+      ...(storyEnable && !scheduledTs ? pages.map(p => ({ label: `Facebook Story · ${p.name}`, kind: 'story', page: p })) : []),
+      ...(storyEnable && scheduledTs ? [{ label: `Facebook Story (ตั้งเวลา) · ${pages.length} เพจ`, kind: 'story_sched', pages }] : []),
       ...(ytEnable ? [{ label: `YouTube · ${state.yt.channel ? state.yt.channel.title : 'channel'}`, kind: 'yt' }] : [])
     ];
     progressInit(items);
@@ -614,10 +625,30 @@
           progressUpdate(i, scheduledTs ? `ตั้งเวลาแล้ว · id ${out.id}` : `สำเร็จ · id ${out.id}`, 'success');
           results.push({ kind: 'fb', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
         } else if (it.kind === 'story') {
-          // Stories don't support native scheduling — post immediately even if a feed schedule was set.
+          // Immediate (no schedule)
           const out = await uploadStoryToFacebook(it.page, state.selectedFile);
           progressUpdate(i, `สำเร็จ · story id ${out.id}`, 'success');
           results.push({ kind: 'story', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
+        } else if (it.kind === 'story_sched') {
+          // Hand off to extension: read file as dataURL, store in extension IDB,
+          // schedule chrome.alarms — background fires upload at fireAt.
+          progressUpdate(i, 'กำลังส่งไฟล์ให้ extension...', 'pending');
+          const dataURL = await fileToDataURL(state.selectedFile);
+          const r = await sendExt({
+            type: 'SCHEDULE_STORY',
+            jobId,
+            pages: it.pages.map(p => ({ id: p.id, name: p.name, pageToken: p.pageToken })),
+            dataURL,
+            fileName: state.selectedFile.name,
+            fireAt: scheduledTs,
+          }, 180000); // 3 min — large file transfer + IDB write
+          if (!r || !r.ok) {
+            progressUpdate(i, 'ตั้งเวลาไม่สำเร็จ: ' + ((r && r.error) || 'unknown'), 'error');
+            results.push({ kind: 'story_sched', ok: false, error: (r && r.error) || 'unknown' });
+          } else {
+            progressUpdate(i, `ตั้งเวลาแล้ว · ยิงเวลา ${fmtTime(scheduledTs)}`, 'success');
+            results.push({ kind: 'story_sched', ok: true, scheduledFor: scheduledTs, pageCount: it.pages.length });
+          }
         } else {
           const out = await uploadToYoutube(state.selectedFile, {
             title: ytTitle,
