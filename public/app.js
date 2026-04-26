@@ -468,6 +468,48 @@
     return { id: d.id, postId: d.post_id || null };
   }
 
+  // ───────── FB Story upload (3-phase: start → upload binary → finish)
+  // Stories require: vertical 9:16, ≤ 90s, MP4/MOV. No native scheduling.
+  async function uploadStoryToFacebook(page, file) {
+    const base = `https://graph.facebook.com/v20.0/${encodeURIComponent(page.id)}/video_stories`;
+    const tokParam = `access_token=${encodeURIComponent(page.pageToken)}`;
+
+    // Phase 1: start
+    const startR = await fetch(`${base}?upload_phase=start&${tokParam}`, { method: 'POST' });
+    const startD = await startR.json().catch(() => ({}));
+    if (!startR.ok || startD.error) {
+      throw new Error('story_start: ' + ((startD.error && startD.error.message) || `HTTP ${startR.status}`));
+    }
+    const { video_id, upload_url } = startD;
+    if (!video_id || !upload_url) throw new Error('story_start: missing video_id/upload_url');
+
+    // Phase 2: upload binary to FB rupload endpoint
+    const upR = await fetch(upload_url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `OAuth ${page.pageToken}`,
+        'offset': '0',
+        'file_size': String(file.size),
+      },
+      body: file
+    });
+    const upD = await upR.json().catch(() => ({}));
+    if (!upR.ok || upD.error || upD.success !== true) {
+      throw new Error('story_upload: ' + ((upD.error && upD.error.message) || JSON.stringify(upD).slice(0, 200)));
+    }
+
+    // Phase 3: finish (publish)
+    const finR = await fetch(
+      `${base}?upload_phase=finish&video_id=${encodeURIComponent(video_id)}&video_state=PUBLISHED&${tokParam}`,
+      { method: 'POST' }
+    );
+    const finD = await finR.json().catch(() => ({}));
+    if (!finR.ok || finD.error) {
+      throw new Error('story_finish: ' + ((finD.error && finD.error.message) || `HTTP ${finR.status}`));
+    }
+    return { id: video_id, postId: finD.post_id || null };
+  }
+
   // ───────── YouTube resumable upload
   async function uploadToYoutube(file, meta, scheduledTs) {
     // Step 1: get fresh access token via background
@@ -538,6 +580,7 @@
     const ytTitle = $('ytTitle').value.trim();
     const ytDesc = $('ytDescription').value.trim();
     const ytPrivacy = $('ytPrivacy').value;
+    const storyEnable = $('storyEnable').checked && pages.length > 0;
 
     if (ytEnable && !ytTitle) return alert('YouTube ต้องการ Title');
 
@@ -553,7 +596,8 @@
     $('postBtn').disabled = true;
 
     const items = [
-      ...pages.map(p => ({ label: `Facebook · ${p.name}`, kind: 'fb', page: p })),
+      ...pages.map(p => ({ label: `Facebook Feed · ${p.name}`, kind: 'fb', page: p })),
+      ...(storyEnable ? pages.map(p => ({ label: `Facebook Story · ${p.name}`, kind: 'story', page: p })) : []),
       ...(ytEnable ? [{ label: `YouTube · ${state.yt.channel ? state.yt.channel.title : 'channel'}`, kind: 'yt' }] : [])
     ];
     progressInit(items);
@@ -569,6 +613,11 @@
           const out = await uploadToFacebook(it.page, state.selectedFile, caption, scheduledTs);
           progressUpdate(i, scheduledTs ? `ตั้งเวลาแล้ว · id ${out.id}` : `สำเร็จ · id ${out.id}`, 'success');
           results.push({ kind: 'fb', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
+        } else if (it.kind === 'story') {
+          // Stories don't support native scheduling — post immediately even if a feed schedule was set.
+          const out = await uploadStoryToFacebook(it.page, state.selectedFile);
+          progressUpdate(i, `สำเร็จ · story id ${out.id}`, 'success');
+          results.push({ kind: 'story', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
         } else {
           const out = await uploadToYoutube(state.selectedFile, {
             title: ytTitle,
@@ -595,6 +644,7 @@
           caption,
           ytEnabled: ytEnable,
           ytTitle: ytEnable ? ytTitle : null,
+          storyEnabled: storyEnable,
           fbPages: pages.map(p => ({ id: p.id, name: p.name })),
           fireAt: scheduledTs,
           createdAt: Date.now(),
@@ -612,6 +662,7 @@
           caption,
           ytEnabled: ytEnable,
           ytTitle: ytEnable ? ytTitle : null,
+          storyEnabled: storyEnable,
           fbPages: pages.map(p => ({ id: p.id, name: p.name })),
           fireAt: null,
           createdAt: Date.now(),
@@ -665,7 +716,8 @@
         statusCls = 'sched-status--scheduled';
       }
       const platforms = [];
-      if (j.fbPages && j.fbPages.length) platforms.push(`FB × ${j.fbPages.length}`);
+      if (j.fbPages && j.fbPages.length) platforms.push(`FB Feed × ${j.fbPages.length}`);
+      if (j.storyEnabled && j.fbPages && j.fbPages.length) platforms.push(`FB Story × ${j.fbPages.length}`);
       if (j.ytEnabled) platforms.push('YouTube');
       return `
         <div class="sched-row">
