@@ -136,10 +136,25 @@
   }
 
   async function fbFetchUserAndPages(token) {
-    // /me and /me/accounts
+    // /me, /me/permissions, /me/accounts
     const meR = await fetch(`https://graph.facebook.com/v20.0/me?access_token=${encodeURIComponent(token)}`);
     const me = await meR.json();
     if (me.error) throw new Error(me.error.message);
+
+    // Check granted permissions
+    const permR = await fetch(`https://graph.facebook.com/v20.0/me/permissions?access_token=${encodeURIComponent(token)}`);
+    const permD = await permR.json();
+    const granted = new Set();
+    const declined = new Set();
+    if (Array.isArray(permD.data)) {
+      for (const p of permD.data) {
+        if (p.status === 'granted') granted.add(p.permission);
+        else declined.add(p.permission);
+      }
+    }
+    console.log('[FB perms] granted:', [...granted], 'declined/missing:', [...declined]);
+    const required = ['pages_show_list', 'pages_manage_posts'];
+    const missing = required.filter(p => !granted.has(p));
 
     let pages = [];
     let next = `https://graph.facebook.com/v20.0/me/accounts?fields=id,name,access_token,category&limit=100&access_token=${encodeURIComponent(token)}`;
@@ -153,6 +168,13 @@
         })));
       }
       next = (d.paging && d.paging.next) || null;
+    }
+
+    if (pages.length === 0 && missing.length > 0) {
+      throw new Error(
+        `FB App ขาดสิทธิ์: ${missing.join(', ')} — ` +
+        `ตอน OAuth dialog ต้องติ๊กให้ครบ หรือเพิ่มตัวเองใน App Roles แล้วเปลี่ยน App เป็น Development mode`
+      );
     }
     return { user: { id: me.id, name: me.name }, pages };
   }
