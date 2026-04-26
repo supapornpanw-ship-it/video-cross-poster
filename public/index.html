@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video Cross-Poster — FB + YouTube</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">📹 Video Cross-Poster</div>
+    <div id="extState" class="ext-state ext-state--off">Extension: ตรวจสอบ...</div>
+  </header>
+
+  <main class="container">
+    <!-- Connection panel -->
+    <section class="panel" id="connectionPanel">
+      <h2>1) เชื่อมต่อบัญชี</h2>
+
+      <div class="conn-row">
+        <div class="conn-info">
+          <div class="conn-label">Facebook</div>
+          <div class="conn-detail" id="fbDetail">ยังไม่ได้เชื่อมต่อ</div>
+        </div>
+        <div class="conn-actions">
+          <button id="fbConnect" class="btn btn-primary">เชื่อมต่อ Facebook</button>
+          <button id="fbDisconnect" class="btn btn-ghost" hidden>ยกเลิก</button>
+        </div>
+      </div>
+
+      <div class="conn-row">
+        <div class="conn-info">
+          <div class="conn-label">YouTube</div>
+          <div class="conn-detail" id="ytDetail">ยังไม่ได้เชื่อมต่อ</div>
+        </div>
+        <div class="conn-actions">
+          <button id="ytConnect" class="btn btn-primary">เชื่อมต่อ YouTube</button>
+          <button id="ytDisconnect" class="btn btn-ghost" hidden>ยกเลิก</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Upload panel -->
+    <section class="panel" id="uploadPanel">
+      <h2>2) อัปโหลดคลิป</h2>
+
+      <div class="form-row">
+        <label class="form-label">ไฟล์วิดีโอ</label>
+        <div class="file-zone" id="fileZone">
+          <input type="file" id="fileInput" accept="video/*" hidden />
+          <div class="file-zone-empty" id="fileZoneEmpty">
+            <div class="file-zone-icon">📁</div>
+            <div>คลิกหรือลากไฟล์มาวาง</div>
+            <div class="muted-sm">รองรับ .mp4, .mov, .webm — แนะนำ &lt; 1GB</div>
+          </div>
+          <div class="file-zone-filled" id="fileZoneFilled" hidden>
+            <div class="file-name" id="fileName">—</div>
+            <div class="muted-sm" id="fileSize">—</div>
+            <button id="fileClear" class="btn btn-ghost btn-sm" type="button">เลือกใหม่</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="captionInput">แคปชั่น (Facebook)</label>
+        <textarea id="captionInput" rows="4" placeholder="ข้อความที่จะลงในโพสต์ Facebook"></textarea>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label">เพจ Facebook ที่จะโพส</label>
+        <div id="pageList" class="page-list">
+          <div class="muted-sm">เชื่อมต่อ Facebook ก่อนเพื่อดูรายการเพจ</div>
+        </div>
+        <div class="page-list-actions" id="pageListActions" hidden>
+          <button id="selectAll" class="btn btn-ghost btn-sm" type="button">เลือกทั้งหมด</button>
+          <button id="selectNone" class="btn btn-ghost btn-sm" type="button">ยกเลิก</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="checkbox-row">
+          <input type="checkbox" id="ytEnable" />
+          <span>ลง YouTube ด้วย (ใช้คลิปต้นฉบับเดียวกัน)</span>
+        </label>
+      </div>
+
+      <div class="form-row yt-fields" id="ytFields" hidden>
+        <div class="grid-2">
+          <div>
+            <label class="form-label" for="ytTitle">Title</label>
+            <input type="text" id="ytTitle" maxlength="100" placeholder="หัวข้อบน YouTube (จำเป็น)" />
+          </div>
+          <div>
+            <label class="form-label" for="ytPrivacy">Privacy</label>
+            <select id="ytPrivacy">
+              <option value="public">Public</option>
+              <option value="unlisted">Unlisted</option>
+              <option value="private">Private</option>
+            </select>
+          </div>
+        </div>
+        <label class="form-label" for="ytDescription">Description (เว้นว่าง = ใช้แคปชั่น FB)</label>
+        <textarea id="ytDescription" rows="3" placeholder="คำอธิบายบน YouTube"></textarea>
+      </div>
+
+      <div class="form-row">
+        <label class="checkbox-row">
+          <input type="checkbox" id="schedEnable" />
+          <span>ตั้งเวลาโพส (ใช้ scheduling แบบ native ของแต่ละแพลตฟอร์ม)</span>
+        </label>
+        <input type="datetime-local" id="schedTime" hidden />
+        <div class="muted-sm" id="schedHint" hidden>
+          FB ต้องการเวลาห่างจากปัจจุบัน 10 นาที – 6 เดือน · YT ต้องการ ≥ 15 นาที
+        </div>
+      </div>
+
+      <div class="action-bar">
+        <button id="postBtn" class="btn btn-primary btn-lg">🚀 โพสคลิป</button>
+        <button id="resetBtn" class="btn btn-ghost" type="button">เริ่มคลิปถัดไป</button>
+      </div>
+
+      <div class="progress" id="progressBox" hidden>
+        <h3>สถานะการอัปโหลด</h3>
+        <div id="progressList"></div>
+      </div>
+    </section>
+
+    <!-- Scheduled list -->
+    <section class="panel" id="scheduledPanel">
+      <h2>3) รายการที่ตั้งเวลา</h2>
+      <div id="scheduledList" class="sched-list">
+        <div class="muted-sm">ยังไม่มีรายการ</div>
+      </div>
+      <div class="action-bar">
+        <button id="refreshSched" class="btn btn-ghost btn-sm" type="button">🔄 รีเฟรช</button>
+        <button id="clearSched" class="btn btn-ghost btn-sm" type="button">ล้างรายการทั้งหมด</button>
+      </div>
+    </section>
+
+    <footer class="foot muted-sm">
+      Tokens เก็บไว้ใน chrome.storage.local เท่านั้น · ไม่มีเซิร์ฟเวอร์เก็บข้อมูลผู้ใช้
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

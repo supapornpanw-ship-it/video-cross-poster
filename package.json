@@ -1,0 +1,9 @@
+{
+  "name": "video-cross-poster",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Post a video to multiple Facebook pages and one YouTube channel.",
+  "engines": {
+    "node": ">=18"
+  }
+}
