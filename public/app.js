@@ -57,22 +57,50 @@
   });
 
   function sendExt(payload, timeoutMs = 30000) {
-    return new Promise(async (resolve) => {
-      if (!state.extReady) {
-        // Try ping then wait briefly
-        await Promise.race([extReadyPromise, sleep(2500)]);
-      }
-      if (!state.extReady) return resolve({ ok: false, error: 'extension_not_loaded' });
+    // Always try sending; if no response within timeout, treat as not-loaded.
+    // We can't rely on the READY message because content.js runs at
+    // document_start and may post READY before app.js's listener attaches.
+    return new Promise((resolve) => {
       const reqId = uid();
-      pending.set(reqId, { resolve });
+      pending.set(reqId, {
+        resolve: (v) => {
+          // Any response = extension is loaded.
+          if (!state.extReady) {
+            state.extReady = true;
+            updateExtState();
+          }
+          resolve(v);
+        }
+      });
       window.postMessage({ source: 'vp-web', reqId, payload }, '*');
       setTimeout(() => {
         if (pending.has(reqId)) {
           pending.delete(reqId);
-          resolve({ ok: false, error: 'extension_timeout' });
+          resolve({ ok: false, error: 'extension_not_loaded' });
         }
       }, timeoutMs);
     });
+  }
+
+  // Periodic ping to detect when extension loads (in case it loads after page).
+  async function pingExtensionLoop() {
+    while (!state.extReady) {
+      await sleep(1500);
+      if (state.extReady) break;
+      const r = await new Promise((resolve) => {
+        const reqId = uid();
+        pending.set(reqId, { resolve });
+        window.postMessage({ source: 'vp-web', reqId, payload: { type: 'PING' } }, '*');
+        setTimeout(() => {
+          if (pending.has(reqId)) { pending.delete(reqId); resolve({ ok: false }); }
+        }, 1200);
+      });
+      if (r && r.ok) {
+        state.extReady = true;
+        updateExtState();
+        break;
+      }
+    }
   }
 
   function updateExtState() {
