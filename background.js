@@ -44,6 +44,13 @@ function dataURLtoBlob(dataURL) {
   return new Blob([arr], { type: mime });
 }
 
+function base64ToUint8Array(b64) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
 // ───────── Background-side Story upload (3 phase: start → upload → finish)
 async function bgUploadStory(page, blob) {
   const base = `https://graph.facebook.com/v20.0/${encodeURIComponent(page.id)}/video_stories`;
@@ -289,9 +296,56 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
           break;
         }
 
+        // ─── Chunked file transfer (chrome.runtime.sendMessage caps at 64MB)
+        case 'STORY_BLOB_INIT': {
+          const { sessionId, mimeType, totalSize, totalChunks } = req;
+          if (!sessionId) { sendResponse({ ok: false, error: 'missing_sessionId' }); break; }
+          await idbPut(`session_${sessionId}`, {
+            mimeType: mimeType || 'video/mp4',
+            totalSize: totalSize || 0,
+            totalChunks: totalChunks || 0,
+            received: 0,
+            createdAt: Date.now(),
+          });
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'STORY_BLOB_CHUNK': {
+          const { sessionId, index, data } = req;
+          const sess = await idbGet(`session_${sessionId}`);
+          if (!sess) { sendResponse({ ok: false, error: 'no_session' }); break; }
+          const arr = base64ToUint8Array(data);
+          await idbPut(`chunk_${sessionId}_${index}`, arr);
+          sess.received = (sess.received || 0) + 1;
+          await idbPut(`session_${sessionId}`, sess);
+          sendResponse({ ok: true, received: sess.received, total: sess.totalChunks });
+          break;
+        }
+
+        case 'STORY_BLOB_FINISH': {
+          const { sessionId } = req;
+          const sess = await idbGet(`session_${sessionId}`);
+          if (!sess) { sendResponse({ ok: false, error: 'no_session' }); break; }
+          const parts = [];
+          for (let i = 0; i < sess.totalChunks; i++) {
+            const c = await idbGet(`chunk_${sessionId}_${i}`);
+            if (!c) { sendResponse({ ok: false, error: `missing_chunk_${i}` }); return; }
+            parts.push(c);
+          }
+          const blob = new Blob(parts, { type: sess.mimeType });
+          // cleanup chunks + session
+          for (let i = 0; i < sess.totalChunks; i++) await idbDel(`chunk_${sessionId}_${i}`);
+          await idbDel(`session_${sessionId}`);
+          // stash blob for SCHEDULE_STORY
+          await idbPut(`pending_${sessionId}`, blob);
+          sendResponse({ ok: true, size: blob.size });
+          break;
+        }
+
         case 'SCHEDULE_STORY': {
-          const { jobId, pages, dataURL, fileName, fireAt } = req;
-          if (!jobId || !pages || !dataURL || !fireAt) {
+          const { jobId, pages, sessionId, dataURL, fileName, fireAt } = req;
+          if (!jobId || !pages || !fireAt) {
             sendResponse({ ok: false, error: 'missing_fields' });
             break;
           }
@@ -299,7 +353,19 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'fireAt must be at least 30s in the future' });
             break;
           }
-          const blob = dataURLtoBlob(dataURL);
+          let blob;
+          if (sessionId) {
+            // Pull pre-uploaded blob from IDB (chunked path)
+            blob = await idbGet(`pending_${sessionId}`);
+            if (!blob) { sendResponse({ ok: false, error: 'no_pending_blob' }); break; }
+            await idbDel(`pending_${sessionId}`);
+          } else if (dataURL) {
+            // Legacy single-message path (only works if file < ~48MB)
+            blob = dataURLtoBlob(dataURL);
+          } else {
+            sendResponse({ ok: false, error: 'no_blob_source' });
+            break;
+          }
           await idbPut(`story_${jobId}`, { blob, pages, fileName, fireAt, createdAt: Date.now() });
           await chrome.alarms.create(`story_${jobId}`, { when: fireAt });
           sendResponse({ ok: true, blobSize: blob.size });

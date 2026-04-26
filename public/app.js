@@ -41,6 +41,53 @@
     });
   }
 
+  // ArrayBuffer → base64 (handles large buffers in slices to avoid call-stack limit).
+  function arrayBufferToBase64(buf) {
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const SUB = 0x8000;
+    for (let i = 0; i < bytes.length; i += SUB) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + SUB));
+    }
+    return btoa(binary);
+  }
+
+  // Send a File/Blob to the extension in 16MB chunks (sendMessage caps at 64MB).
+  // Returns { sessionId, size } once finished. onProgress(0..1) optional.
+  async function uploadBlobToExtensionChunked(file, onProgress) {
+    const CHUNK_RAW = 16 * 1024 * 1024; // 16MB raw → ~21MB base64 (well under 64MB)
+    const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_RAW));
+    const sessionId = uid();
+
+    let r = await sendExt({
+      type: 'STORY_BLOB_INIT',
+      sessionId,
+      mimeType: file.type || 'video/mp4',
+      totalSize: file.size,
+      totalChunks,
+    }, 30000);
+    if (!r || !r.ok) throw new Error('init_fail: ' + (r && r.error));
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_RAW;
+      const end = Math.min(start + CHUNK_RAW, file.size);
+      const buf = await file.slice(start, end).arrayBuffer();
+      const b64 = arrayBufferToBase64(buf);
+      r = await sendExt({
+        type: 'STORY_BLOB_CHUNK',
+        sessionId,
+        index: i,
+        data: b64,
+      }, 90000);
+      if (!r || !r.ok) throw new Error(`chunk ${i + 1}/${totalChunks} fail: ` + (r && r.error));
+      if (typeof onProgress === 'function') onProgress((i + 1) / totalChunks);
+    }
+
+    r = await sendExt({ type: 'STORY_BLOB_FINISH', sessionId }, 30000);
+    if (!r || !r.ok) throw new Error('finish_fail: ' + (r && r.error));
+    return { sessionId, size: r.size };
+  }
+
   // ───────── Extension bridge
   const pending = new Map();
   let extReadyResolve;
@@ -630,24 +677,30 @@
           progressUpdate(i, `สำเร็จ · story id ${out.id}`, 'success');
           results.push({ kind: 'story', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
         } else if (it.kind === 'story_sched') {
-          // Hand off to extension: read file as dataURL, store in extension IDB,
-          // schedule chrome.alarms — background fires upload at fireAt.
-          progressUpdate(i, 'กำลังส่งไฟล์ให้ extension...', 'pending');
-          const dataURL = await fileToDataURL(state.selectedFile);
-          const r = await sendExt({
-            type: 'SCHEDULE_STORY',
-            jobId,
-            pages: it.pages.map(p => ({ id: p.id, name: p.name, pageToken: p.pageToken })),
-            dataURL,
-            fileName: state.selectedFile.name,
-            fireAt: scheduledTs,
-          }, 180000); // 3 min — large file transfer + IDB write
-          if (!r || !r.ok) {
-            progressUpdate(i, 'ตั้งเวลาไม่สำเร็จ: ' + ((r && r.error) || 'unknown'), 'error');
-            results.push({ kind: 'story_sched', ok: false, error: (r && r.error) || 'unknown' });
-          } else {
-            progressUpdate(i, `ตั้งเวลาแล้ว · ยิงเวลา ${fmtTime(scheduledTs)}`, 'success');
-            results.push({ kind: 'story_sched', ok: true, scheduledFor: scheduledTs, pageCount: it.pages.length });
+          // Chunked transfer: split file into 16MB pieces, send each as a
+          // separate message, then schedule the alarm.
+          try {
+            const upload = await uploadBlobToExtensionChunked(state.selectedFile, (frac) => {
+              progressUpdate(i, `กำลังส่งไฟล์ให้ extension... ${Math.round(frac * 100)}%`, 'pending');
+            });
+            const r = await sendExt({
+              type: 'SCHEDULE_STORY',
+              jobId,
+              pages: it.pages.map(p => ({ id: p.id, name: p.name, pageToken: p.pageToken })),
+              sessionId: upload.sessionId,
+              fileName: state.selectedFile.name,
+              fireAt: scheduledTs,
+            }, 30000);
+            if (!r || !r.ok) {
+              progressUpdate(i, 'ตั้งเวลาไม่สำเร็จ: ' + ((r && r.error) || 'unknown'), 'error');
+              results.push({ kind: 'story_sched', ok: false, error: (r && r.error) || 'unknown' });
+            } else {
+              progressUpdate(i, `ตั้งเวลาแล้ว · ยิงเวลา ${fmtTime(scheduledTs)}`, 'success');
+              results.push({ kind: 'story_sched', ok: true, scheduledFor: scheduledTs, pageCount: it.pages.length });
+            }
+          } catch (err) {
+            progressUpdate(i, 'ส่งไฟล์ให้ extension ไม่สำเร็จ: ' + err.message, 'error');
+            results.push({ kind: 'story_sched', ok: false, error: err.message });
           }
         } else {
           const out = await uploadToYoutube(state.selectedFile, {
