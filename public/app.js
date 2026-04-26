@@ -776,6 +776,144 @@
   }
 
   // ───────── Scheduled list
+  function fmtCountdown(targetMs) {
+    const diff = targetMs - Date.now();
+    const abs = Math.abs(diff);
+    const d = Math.floor(abs / 86400000);
+    const h = Math.floor((abs % 86400000) / 3600000);
+    const m = Math.floor((abs % 3600000) / 60000);
+    const s = Math.floor((abs % 60000) / 1000);
+    let txt;
+    if (d > 0) txt = `${d} วัน ${h} ชม`;
+    else if (h > 0) txt = `${h} ชม ${m} นาที`;
+    else if (m > 0) txt = `${m} นาที`;
+    else txt = `${s} วินาที`;
+    return diff > 0 ? `อีก ${txt}` : `เลยมา ${txt}`;
+  }
+
+  function statusIconForResult(result) {
+    if (!result) return '⏳';
+    if (result.ok) return '✅';
+    return '❌';
+  }
+
+  function jobOverallStatus(j) {
+    const now = Date.now();
+    const results = j.results || [];
+    const hasErr = results.some(r => !r.ok);
+
+    // Story scheduled separately — pending until fired
+    const hasPendingStory = j.storyEnabled && j.fireAt &&
+      !results.some(r => r.kind === 'story' || r.kind === 'story_scheduled_done');
+    const storyAlarmFired = j.storyFiredAt;
+
+    if (!j.fireAt) {
+      // Posted immediately
+      return hasErr
+        ? { label: 'มี error', cls: 'sched-status--error' }
+        : { label: 'สำเร็จ', cls: 'sched-status--done' };
+    }
+
+    // Scheduled job
+    if (now < j.fireAt - 1000) {
+      return { label: 'รอเวลา', cls: 'sched-status--scheduled' };
+    }
+    if (j.storyEnabled && !storyAlarmFired && now < j.fireAt + 5 * 60000) {
+      return { label: 'กำลังยิง...', cls: 'sched-status--scheduled' };
+    }
+    return hasErr
+      ? { label: 'มี error', cls: 'sched-status--error' }
+      : { label: 'สำเร็จ', cls: 'sched-status--done' };
+  }
+
+  function renderJobBreakdown(j) {
+    const blocks = [];
+    const results = j.results || [];
+    const findResult = (kind, pageId) => results.find(r =>
+      r.kind === kind && (pageId == null || r.pageId === pageId)
+    );
+
+    // Facebook Feed per page
+    if (j.fbPages && j.fbPages.length) {
+      const lines = j.fbPages.map(p => {
+        const res = findResult('fb', p.id);
+        let icon, hint;
+        if (j.fireAt && !res) {
+          icon = '🕐'; hint = 'รอ FB เผยแพร่ตามเวลา';
+        } else {
+          icon = statusIconForResult(res);
+          hint = res ? (res.ok ? `id ${res.id}` : `error: ${res.error}`) : '';
+        }
+        return `<div class="bd-row">
+          <span class="bd-icon">${icon}</span>
+          <span class="bd-name">${escHtml(p.name)}</span>
+          <span class="bd-hint muted-sm">${escHtml(hint)}</span>
+        </div>`;
+      }).join('');
+      blocks.push(`
+        <div class="bd-block">
+          <div class="bd-platform">📘 Facebook Feed</div>
+          ${lines}
+        </div>
+      `);
+    }
+
+    // Facebook Story
+    if (j.storyEnabled && j.fbPages && j.fbPages.length) {
+      const lines = j.fbPages.map(p => {
+        const storyRes = findResult('story', p.id);
+        const storySchedFail = results.find(r => r.kind === 'story_sched' && !r.ok);
+        let icon, hint;
+        if (storyRes) {
+          icon = statusIconForResult(storyRes);
+          hint = storyRes.ok ? `id ${storyRes.id}` : `error: ${storyRes.error}`;
+        } else if (storySchedFail) {
+          icon = '❌'; hint = `error: ${storySchedFail.error}`;
+        } else if (j.fireAt) {
+          icon = '🕐'; hint = 'รอเวลา → extension จะยิง';
+        } else {
+          icon = '⏳'; hint = '';
+        }
+        return `<div class="bd-row">
+          <span class="bd-icon">${icon}</span>
+          <span class="bd-name">${escHtml(p.name)}</span>
+          <span class="bd-hint muted-sm">${escHtml(hint)}</span>
+        </div>`;
+      }).join('');
+      blocks.push(`
+        <div class="bd-block">
+          <div class="bd-platform">📱 Facebook Story</div>
+          ${lines}
+        </div>
+      `);
+    }
+
+    // YouTube
+    if (j.ytEnabled) {
+      const ytRes = findResult('yt');
+      let icon, hint;
+      if (ytRes) {
+        icon = statusIconForResult(ytRes);
+        hint = ytRes.ok ? `id ${ytRes.id}` : `error: ${ytRes.error}`;
+      } else if (j.fireAt) {
+        icon = '🕐'; hint = 'รอ YouTube เผยแพร่ตามเวลา';
+      } else {
+        icon = '⏳'; hint = '';
+      }
+      blocks.push(`
+        <div class="bd-block">
+          <div class="bd-platform">▶️ YouTube</div>
+          <div class="bd-row">
+            <span class="bd-icon">${icon}</span>
+            <span class="bd-name">${escHtml(j.ytTitle || 'Untitled')}</span>
+            <span class="bd-hint muted-sm">${escHtml(hint)}</span>
+          </div>
+        </div>
+      `);
+    }
+    return blocks.join('');
+  }
+
   async function loadScheduled() {
     const r = await sendExt({ type: 'GET_STATE' });
     if (!r.ok) return;
@@ -785,36 +923,27 @@
       wrap.innerHTML = '<div class="muted-sm">ยังไม่มีรายการ</div>';
       return;
     }
-    const now = Date.now();
     wrap.innerHTML = jobs.map(j => {
-      let statusLabel, statusCls;
-      const hasErr = (j.results || []).some(x => !x.ok);
-      if (j.status === 'done' || !j.fireAt) {
-        statusLabel = hasErr ? 'มี error' : 'สำเร็จ';
-        statusCls = hasErr ? 'sched-status--error' : 'sched-status--done';
-      } else if (now > j.fireAt + 60000) {
-        statusLabel = 'ถึงเวลาแล้ว';
-        statusCls = 'sched-status--done';
-      } else {
-        statusLabel = 'ตั้งเวลา';
-        statusCls = 'sched-status--scheduled';
-      }
-      const platforms = [];
-      if (j.fbPages && j.fbPages.length) platforms.push(`FB Feed × ${j.fbPages.length}`);
-      if (j.storyEnabled && j.fbPages && j.fbPages.length) platforms.push(`FB Story × ${j.fbPages.length}`);
-      if (j.ytEnabled) platforms.push('YouTube');
+      const status = jobOverallStatus(j);
+      const fireLine = j.fireAt
+        ? `<span class="job-when">⏰ ${escHtml(fmtTime(j.fireAt))}</span> <span class="job-countdown muted-sm">${escHtml(fmtCountdown(j.fireAt))}</span>`
+        : `<span class="job-when">📤 โพสทันที</span>`;
       return `
-        <div class="sched-row">
-          <div class="sched-info">
-            <div class="sched-title">${escHtml(j.fileName || '(no file)')}</div>
-            <div class="sched-meta">
-              ${platforms.join(' · ')} ·
-              ${j.fireAt ? 'ยิงเวลา ' + fmtTime(j.fireAt) : 'โพสทันที'} ·
-              สร้าง ${fmtTime(j.createdAt)}
+        <div class="job-card">
+          <div class="job-head">
+            <div class="job-head-left">
+              <div class="job-file">📹 ${escHtml(j.fileName || '(no file)')}</div>
+              <div class="job-when-line">${fireLine}</div>
+            </div>
+            <div class="job-head-right">
+              <span class="sched-status ${status.cls}">${escHtml(status.label)}</span>
+              <button class="btn btn-ghost btn-sm" data-del="${escHtml(j.id)}" type="button">ลบ</button>
             </div>
           </div>
-          <span class="sched-status ${statusCls}">${escHtml(statusLabel)}</span>
-          <button class="btn btn-ghost btn-sm" data-del="${escHtml(j.id)}" type="button">ลบ</button>
+          <div class="job-body">
+            ${renderJobBreakdown(j)}
+          </div>
+          <div class="job-foot muted-sm">สร้างเมื่อ ${escHtml(fmtTime(j.createdAt))}</div>
         </div>
       `;
     }).join('');
@@ -826,6 +955,12 @@
       });
     });
   }
+
+  // Refresh countdown every 30s while page is open
+  setInterval(() => {
+    const wrap = $('scheduledList');
+    if (wrap && wrap.querySelector('.job-card')) loadScheduled();
+  }, 30000);
 
   // ───────── Init
   async function loadConfig() {

@@ -170,23 +170,71 @@ textarea { resize: vertical; min-height: 70px; }
 .progress-status.success { color: #6ee7b7; }
 .progress-status.error { color: #fca5a5; }
 
-.sched-list { display: flex; flex-direction: column; gap: 8px; }
-.sched-row {
-  display: flex; justify-content: space-between; gap: 12px;
-  padding: 12px; border: 1px solid var(--border);
-  border-radius: 8px; background: var(--panel-2);
-}
-.sched-info { flex: 1; min-width: 0; }
-.sched-title { font-weight: 500; }
-.sched-meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.sched-list { display: flex; flex-direction: column; gap: 12px; }
+
 .sched-status {
   font-size: 12px; padding: 3px 10px; border-radius: 999px;
   background: #2a2f38; color: var(--muted);
-  align-self: flex-start; white-space: nowrap;
+  white-space: nowrap;
 }
 .sched-status--scheduled { background: #1e3a5f; color: #93c5fd; }
 .sched-status--done { background: #143d2b; color: #6ee7b7; }
 .sched-status--error { background: #3f1d1d; color: #fca5a5; }
+
+/* Job card */
+.job-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+.job-head {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.job-head-left { flex: 1; min-width: 0; }
+.job-file {
+  font-weight: 600; font-size: 15px;
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+.job-when-line { font-size: 13px; }
+.job-when { color: var(--text); font-weight: 500; }
+.job-countdown { margin-left: 8px; }
+.job-head-right { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+
+.job-body { display: flex; flex-direction: column; gap: 10px; }
+.bd-block {}
+.bd-platform {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.bd-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.bd-row:hover { background: rgba(255,255,255,0.03); }
+.bd-icon { font-size: 14px; flex-shrink: 0; width: 18px; }
+.bd-name { font-weight: 500; flex-shrink: 0; }
+.bd-hint {
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 11px;
+}
+
+.job-foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
 
 .manual-box {
   background: var(--panel-2);
