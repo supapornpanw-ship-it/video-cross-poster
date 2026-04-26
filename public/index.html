@@ -24,7 +24,20 @@
         </div>
         <div class="conn-actions">
           <button id="fbConnect" class="btn btn-primary">เชื่อมต่อ Facebook</button>
+          <button id="fbToggleManual" class="btn btn-ghost" type="button">📋 ใส่ token เอง</button>
           <button id="fbDisconnect" class="btn btn-ghost" hidden>ยกเลิก</button>
+        </div>
+      </div>
+      <div id="fbManualBox" class="manual-box" hidden>
+        <label class="form-label" for="fbManualToken">User Access Token (จาก Graph API Explorer)</label>
+        <textarea id="fbManualToken" rows="3" placeholder="EAAJZ... (paste User Token ที่มี permission pages_show_list, pages_manage_posts)"></textarea>
+        <div class="muted-sm" style="margin-top:6px">
+          ขอที่ <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener" style="color:#3b82f6">Graph API Explorer</a> →
+          เลือก App <code>721475520495705</code> → Add Permissions: <code>pages_show_list, pages_manage_posts, pages_read_engagement</code> → Generate Token
+        </div>
+        <div class="action-bar" style="margin-top:10px">
+          <button id="fbManualSubmit" class="btn btn-primary btn-sm" type="button">ใช้ token นี้</button>
+          <button id="fbManualCancel" class="btn btn-ghost btn-sm" type="button">ยกเลิก</button>
         </div>
       </div>
 

@@ -188,4 +188,19 @@ textarea { resize: vertical; min-height: 70px; }
 .sched-status--done { background: #143d2b; color: #6ee7b7; }
 .sched-status--error { background: #3f1d1d; color: #fca5a5; }
 
+.manual-box {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.manual-box code {
+  background: #11141a;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
 .foot { text-align: center; padding-top: 20px; }

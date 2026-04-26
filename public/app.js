@@ -179,6 +179,49 @@
     return { user: { id: me.id, name: me.name }, pages };
   }
 
+  async function fbManualConnect() {
+    const tokenRaw = $('fbManualToken').value.trim();
+    if (!tokenRaw) return alert('กรุณาวาง User Access Token');
+    // Strip any leading "Bearer " or whitespace
+    const token = tokenRaw.replace(/^Bearer\s+/i, '').trim();
+    const btn = $('fbManualSubmit');
+    btn.disabled = true;
+    btn.textContent = 'กำลังตรวจ token...';
+    try {
+      const { user, pages } = await fbFetchUserAndPages(token);
+      // Try to find token expiry via debug_token (best effort).
+      let expiresIn = null;
+      try {
+        const dtR = await fetch(
+          `https://graph.facebook.com/v20.0/debug_token?input_token=${encodeURIComponent(token)}&access_token=${encodeURIComponent(token)}`
+        );
+        const dtD = await dtR.json();
+        if (dtD.data && dtD.data.expires_at) {
+          const left = dtD.data.expires_at - Math.floor(Date.now() / 1000);
+          if (left > 0) expiresIn = left;
+        }
+      } catch (_) {}
+
+      await sendExt({
+        type: 'SAVE_FB',
+        token,
+        expires: expiresIn,
+        user, pages,
+      });
+      state.fb = { token, expires: expiresIn, user, pages };
+      $('fbManualToken').value = '';
+      $('fbManualBox').hidden = true;
+      renderConnections();
+      renderPageList();
+      alert(`เชื่อมต่อสำเร็จ — โหลด ${pages.length} เพจ`);
+    } catch (err) {
+      alert('Token ใช้ไม่ได้: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'ใช้ token นี้';
+    }
+  }
+
   async function fbDisconnect() {
     if (!confirm('ยกเลิกการเชื่อมต่อ Facebook?')) return;
     await sendExt({ type: 'CLEAR_FB' });
@@ -639,6 +682,16 @@
     // Wire up handlers
     $('fbConnect').addEventListener('click', fbConnect);
     $('fbDisconnect').addEventListener('click', fbDisconnect);
+    $('fbToggleManual').addEventListener('click', () => {
+      const box = $('fbManualBox');
+      box.hidden = !box.hidden;
+      if (!box.hidden) $('fbManualToken').focus();
+    });
+    $('fbManualCancel').addEventListener('click', () => {
+      $('fbManualBox').hidden = true;
+      $('fbManualToken').value = '';
+    });
+    $('fbManualSubmit').addEventListener('click', fbManualConnect);
     $('ytConnect').addEventListener('click', ytConnect);
     $('ytDisconnect').addEventListener('click', ytDisconnect);
 
