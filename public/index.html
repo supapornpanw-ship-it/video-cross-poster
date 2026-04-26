@@ -29,15 +29,46 @@
         </div>
       </div>
       <div id="fbManualBox" class="manual-box" hidden>
-        <label class="form-label" for="fbManualToken">User Access Token (จาก Graph API Explorer)</label>
-        <textarea id="fbManualToken" rows="3" placeholder="EAAJZ... (paste User Token ที่มี permission pages_show_list, pages_manage_posts)"></textarea>
-        <div class="muted-sm" style="margin-top:6px">
-          ขอที่ <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener" style="color:#3b82f6">Graph API Explorer</a> →
-          เลือก App <code>721475520495705</code> → Add Permissions: <code>pages_show_list, pages_manage_posts, pages_read_engagement</code> → Generate Token
+        <div class="manual-tabs">
+          <button class="manual-tab active" data-tab="user" type="button">User Token (auto-load เพจ)</button>
+          <button class="manual-tab" data-tab="page" type="button">Page Token (ทีละเพจ)</button>
         </div>
-        <div class="action-bar" style="margin-top:10px">
-          <button id="fbManualSubmit" class="btn btn-primary btn-sm" type="button">ใช้ token นี้</button>
-          <button id="fbManualCancel" class="btn btn-ghost btn-sm" type="button">ยกเลิก</button>
+
+        <div id="fbManualUserPanel" class="manual-panel">
+          <label class="form-label" for="fbManualToken">User Access Token (จาก Graph API Explorer)</label>
+          <textarea id="fbManualToken" rows="3" placeholder="EAAJZ... (paste User Token ที่มี permission pages_show_list, pages_manage_posts)"></textarea>
+          <div class="muted-sm" style="margin-top:6px">
+            ขอที่ <a href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener" style="color:#3b82f6">Graph API Explorer</a> →
+            App <code>721475520495705</code> → permissions: <code>pages_show_list, pages_manage_posts, pages_read_engagement</code>
+          </div>
+          <div class="action-bar" style="margin-top:10px">
+            <button id="fbManualSubmit" class="btn btn-primary btn-sm" type="button">ใช้ token นี้</button>
+            <button id="fbManualCancel" class="btn btn-ghost btn-sm" type="button">ยกเลิก</button>
+          </div>
+        </div>
+
+        <div id="fbManualPagePanel" class="manual-panel" hidden>
+          <div class="muted-sm" style="margin-bottom:10px">
+            ใช้กรณีเพจอยู่ใน Business Manager → ขอ <strong>Page Access Token</strong> โดยตรงจาก
+            <a href="https://business.facebook.com/settings/system-users" target="_blank" rel="noopener" style="color:#3b82f6">Business Settings → System Users</a>
+            หรือ Graph API Explorer (เลือก Page Token แทน User Token)
+          </div>
+          <div class="grid-2">
+            <div>
+              <label class="form-label" for="fbPageIdInput">Page ID</label>
+              <input type="text" id="fbPageIdInput" placeholder="เช่น 100123456789" />
+            </div>
+            <div>
+              <label class="form-label" for="fbPageNameInput">ชื่อเพจ (auto-detect)</label>
+              <input type="text" id="fbPageNameInput" placeholder="ปล่อยว่างให้ดึงเอง" />
+            </div>
+          </div>
+          <label class="form-label" for="fbPageTokenInput">Page Access Token</label>
+          <textarea id="fbPageTokenInput" rows="3" placeholder="EAAJZ... (Page Token เฉพาะเพจนี้)"></textarea>
+          <div class="action-bar" style="margin-top:10px">
+            <button id="fbAddPageBtn" class="btn btn-primary btn-sm" type="button">+ เพิ่มเพจ</button>
+            <button id="fbManualCancel2" class="btn btn-ghost btn-sm" type="button">ยกเลิก</button>
+          </div>
         </div>
       </div>
 

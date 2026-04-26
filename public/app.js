@@ -222,6 +222,59 @@
     }
   }
 
+  async function fbAddPageManual() {
+    const pageId = $('fbPageIdInput').value.trim();
+    const pageNameRaw = $('fbPageNameInput').value.trim();
+    const pageTokenRaw = $('fbPageTokenInput').value.trim();
+    if (!pageId || !pageTokenRaw) {
+      return alert('ต้องใส่ทั้ง Page ID และ Page Token');
+    }
+    const pageToken = pageTokenRaw.replace(/^Bearer\s+/i, '').trim();
+
+    const btn = $('fbAddPageBtn');
+    btn.disabled = true;
+    btn.textContent = 'กำลังตรวจ...';
+    try {
+      // Verify by calling /{page_id}?fields=id,name with page token
+      const r = await fetch(
+        `https://graph.facebook.com/v20.0/${encodeURIComponent(pageId)}?fields=id,name,category&access_token=${encodeURIComponent(pageToken)}`
+      );
+      const d = await r.json();
+      if (d.error) throw new Error(d.error.message);
+      if (!d.id) throw new Error('ไม่พบ page id ที่ตรงกัน');
+
+      const name = pageNameRaw || d.name || `Page ${pageId}`;
+      const category = d.category || null;
+
+      // Append (or replace if exists) into state.fb.pages
+      const existing = state.fb.pages.filter(p => p.id !== d.id);
+      const newPages = [...existing, { id: d.id, name, pageToken, category }];
+
+      // Make sure SAVE_FB has a "user" + dummy "token" so connection counts as connected.
+      const fbToken = state.fb.token || '__manual__';
+      await sendExt({
+        type: 'SAVE_FB',
+        token: fbToken,
+        expires: state.fb.expires || null,
+        user: state.fb.user || { id: 'manual', name: 'Manual paste' },
+        pages: newPages,
+      });
+      state.fb = { token: fbToken, expires: state.fb.expires, user: state.fb.user || { id: 'manual', name: 'Manual paste' }, pages: newPages };
+
+      $('fbPageIdInput').value = '';
+      $('fbPageNameInput').value = '';
+      $('fbPageTokenInput').value = '';
+      renderConnections();
+      renderPageList();
+      alert(`เพิ่มเพจ "${name}" สำเร็จ — ตอนนี้มี ${newPages.length} เพจ`);
+    } catch (err) {
+      alert('เพิ่มเพจไม่สำเร็จ: ' + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '+ เพิ่มเพจ';
+    }
+  }
+
   async function fbDisconnect() {
     if (!confirm('ยกเลิกการเชื่อมต่อ Facebook?')) return;
     await sendExt({ type: 'CLEAR_FB' });
@@ -687,11 +740,28 @@
       box.hidden = !box.hidden;
       if (!box.hidden) $('fbManualToken').focus();
     });
-    $('fbManualCancel').addEventListener('click', () => {
+    const closeManual = () => {
       $('fbManualBox').hidden = true;
       $('fbManualToken').value = '';
-    });
+      $('fbPageIdInput').value = '';
+      $('fbPageNameInput').value = '';
+      $('fbPageTokenInput').value = '';
+    };
+    $('fbManualCancel').addEventListener('click', closeManual);
+    $('fbManualCancel2').addEventListener('click', closeManual);
     $('fbManualSubmit').addEventListener('click', fbManualConnect);
+    $('fbAddPageBtn').addEventListener('click', fbAddPageManual);
+
+    // Tab switching
+    document.querySelectorAll('.manual-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.manual-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        $('fbManualUserPanel').hidden = tab !== 'user';
+        $('fbManualPagePanel').hidden = tab !== 'page';
+      });
+    });
     $('ytConnect').addEventListener('click', ytConnect);
     $('ytDisconnect').addEventListener('click', ytDisconnect);
 
