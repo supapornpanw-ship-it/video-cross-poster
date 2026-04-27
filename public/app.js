@@ -893,29 +893,48 @@
       : { label: 'สำเร็จ', cls: 'sched-status--done' };
   }
 
+  // Render one row per upload target. Successes show id inline; failures show
+  // full error text on a new line in red so it's never truncated.
+  function bdRow(icon, name, opts) {
+    const o = opts || {};
+    const hintHtml = o.hint
+      ? `<span class="bd-hint muted-sm">${escHtml(o.hint)}</span>`
+      : '';
+    const errHtml = o.error
+      ? `<div class="bd-error">⚠ ${escHtml(o.error)}</div>`
+      : '';
+    return `
+      <div class="bd-row${o.error ? ' bd-row--err' : ''}${o.stuck ? ' bd-row--stuck' : ''}">
+        <div class="bd-row-main">
+          <span class="bd-icon">${icon}</span>
+          <span class="bd-name">${escHtml(name)}</span>
+          ${hintHtml}
+        </div>
+        ${errHtml}
+      </div>
+    `;
+  }
+
   function renderJobBreakdown(j) {
     const blocks = [];
     const results = j.results || [];
     const findResult = (kind, pageId) => results.find(r =>
       r.kind === kind && (pageId == null || r.pageId === pageId)
     );
+    const now = Date.now();
+    const isStoryStuck = j.storyEnabled && j.fireAt && j.fireAt < now - 5 * 60000 && !j.storyFiredAt;
 
     // Facebook Feed per page
     if (j.fbPages && j.fbPages.length) {
       const lines = j.fbPages.map(p => {
         const res = findResult('fb', p.id);
-        let icon, hint;
         if (j.fireAt && !res) {
-          icon = '🕐'; hint = 'รอ FB เผยแพร่ตามเวลา';
-        } else {
-          icon = statusIconForResult(res);
-          hint = res ? (res.ok ? `id ${res.id}` : `error: ${res.error}`) : '';
+          return bdRow('🕐', p.name, { hint: 'รอ FB เผยแพร่ตามเวลา' });
         }
-        return `<div class="bd-row">
-          <span class="bd-icon">${icon}</span>
-          <span class="bd-name">${escHtml(p.name)}</span>
-          <span class="bd-hint muted-sm">${escHtml(hint)}</span>
-        </div>`;
+        if (!res) return bdRow('⏳', p.name, {});
+        return res.ok
+          ? bdRow('✅', p.name, { hint: `id ${res.id}` })
+          : bdRow('❌', p.name, { error: res.error });
       }).join('');
       blocks.push(`
         <div class="bd-block">
@@ -927,25 +946,31 @@
 
     // Facebook Story
     if (j.storyEnabled && j.fbPages && j.fbPages.length) {
+      const storySchedFail = results.find(r => r.kind === 'story_sched' && !r.ok);
       const lines = j.fbPages.map(p => {
         const storyRes = findResult('story', p.id);
-        const storySchedFail = results.find(r => r.kind === 'story_sched' && !r.ok);
-        let icon, hint;
         if (storyRes) {
-          icon = statusIconForResult(storyRes);
-          hint = storyRes.ok ? `id ${storyRes.id}` : `error: ${storyRes.error}`;
-        } else if (storySchedFail) {
-          icon = '❌'; hint = `error: ${storySchedFail.error}`;
-        } else if (j.fireAt) {
-          icon = '🕐'; hint = 'รอเวลา → extension จะยิง';
-        } else {
-          icon = '⏳'; hint = '';
+          return storyRes.ok
+            ? bdRow('✅', p.name, { hint: `id ${storyRes.id}` })
+            : bdRow('❌', p.name, { error: storyRes.error });
         }
-        return `<div class="bd-row">
-          <span class="bd-icon">${icon}</span>
-          <span class="bd-name">${escHtml(p.name)}</span>
-          <span class="bd-hint muted-sm">${escHtml(hint)}</span>
-        </div>`;
+        // No result for this page yet
+        if (storySchedFail) {
+          return bdRow('❌', p.name, { error: 'ตั้งเวลาไม่สำเร็จ: ' + storySchedFail.error });
+        }
+        if (isStoryStuck) {
+          return bdRow('⚠️', p.name, {
+            error: 'ไม่ได้โพส — Service Worker ตายกลางทาง · กด "ลองโพสสตอรี่ใหม่"',
+            stuck: true
+          });
+        }
+        if (j.fireAt && j.fireAt > now) {
+          return bdRow('🕐', p.name, { hint: 'รอเวลา → extension จะยิง' });
+        }
+        if (j.fireAt) {
+          return bdRow('⏳', p.name, { hint: 'กำลังยิง...' });
+        }
+        return bdRow('⏳', p.name, {});
       }).join('');
       blocks.push(`
         <div class="bd-block">
@@ -958,23 +983,21 @@
     // YouTube
     if (j.ytEnabled) {
       const ytRes = findResult('yt');
-      let icon, hint;
+      const name = j.ytTitle || 'Untitled';
+      let row;
       if (ytRes) {
-        icon = statusIconForResult(ytRes);
-        hint = ytRes.ok ? `id ${ytRes.id}` : `error: ${ytRes.error}`;
+        row = ytRes.ok
+          ? bdRow('✅', name, { hint: `id ${ytRes.id}` })
+          : bdRow('❌', name, { error: ytRes.error });
       } else if (j.fireAt) {
-        icon = '🕐'; hint = 'รอ YouTube เผยแพร่ตามเวลา';
+        row = bdRow('🕐', name, { hint: 'รอ YouTube เผยแพร่ตามเวลา' });
       } else {
-        icon = '⏳'; hint = '';
+        row = bdRow('⏳', name, {});
       }
       blocks.push(`
         <div class="bd-block">
           <div class="bd-platform">▶️ YouTube</div>
-          <div class="bd-row">
-            <span class="bd-icon">${icon}</span>
-            <span class="bd-name">${escHtml(j.ytTitle || 'Untitled')}</span>
-            <span class="bd-hint muted-sm">${escHtml(hint)}</span>
-          </div>
+          ${row}
         </div>
       `);
     }

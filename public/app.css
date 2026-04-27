@@ -238,12 +238,14 @@ textarea { resize: vertical; min-height: 70px; }
   letter-spacing: 0.3px;
 }
 .bd-row {
-  display: flex; align-items: center; gap: 8px;
   padding: 5px 8px;
   border-radius: 6px;
   font-size: 13px;
 }
 .bd-row:hover { background: rgba(255,255,255,0.03); }
+.bd-row-main {
+  display: flex; align-items: center; gap: 8px;
+}
 .bd-icon { font-size: 14px; flex-shrink: 0; width: 18px; }
 .bd-name { font-weight: 500; flex-shrink: 0; }
 .bd-hint {
@@ -251,6 +253,25 @@ textarea { resize: vertical; min-height: 70px; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-size: 11px;
 }
+.bd-error {
+  margin-top: 4px;
+  margin-left: 26px;
+  padding: 6px 8px;
+  background: rgba(239,68,68,0.08);
+  border-left: 3px solid #ef4444;
+  border-radius: 4px;
+  color: #fca5a5;
+  font-size: 12px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.bd-row--err { background: rgba(239,68,68,0.04); }
+.bd-row--stuck .bd-error {
+  background: rgba(251,191,36,0.08);
+  border-left-color: #fbbf24;
+  color: #fbbf24;
+}
+.bd-row--stuck { background: rgba(251,191,36,0.04); }
 
 .job-foot {
   margin-top: 10px;
