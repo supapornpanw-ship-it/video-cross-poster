@@ -844,15 +844,12 @@
     return '❌';
   }
 
+  // Returns { label, cls, stuck: bool }
+  // "ค้าง" = scheduled time passed but story never fired (SW killed/missed alarm)
   function jobOverallStatus(j) {
     const now = Date.now();
     const results = j.results || [];
     const hasErr = results.some(r => !r.ok);
-
-    // Story scheduled separately — pending until fired
-    const hasPendingStory = j.storyEnabled && j.fireAt &&
-      !results.some(r => r.kind === 'story' || r.kind === 'story_scheduled_done');
-    const storyAlarmFired = j.storyFiredAt;
 
     if (!j.fireAt) {
       // Posted immediately
@@ -861,13 +858,36 @@
         : { label: 'สำเร็จ', cls: 'sched-status--done' };
     }
 
-    // Scheduled job
+    // ── Scheduled job ──
     if (now < j.fireAt - 1000) {
       return { label: 'รอเวลา', cls: 'sched-status--scheduled' };
     }
-    if (j.storyEnabled && !storyAlarmFired && now < j.fireAt + 5 * 60000) {
-      return { label: 'กำลังยิง...', cls: 'sched-status--scheduled' };
+
+    // Story-scheduled job: storyFiredAt being set means alarm completed (success or partial)
+    if (j.storyEnabled) {
+      // Within 5min grace period of fire time — could still be uploading
+      if (!j.storyFiredAt && now < j.fireAt + 5 * 60000) {
+        return { label: 'กำลังยิง...', cls: 'sched-status--scheduled' };
+      }
+      // Past grace period without storyFiredAt = STUCK (SW probably killed)
+      if (!j.storyFiredAt) {
+        return { label: '⚠️ ค้าง — ไม่ได้โพส', cls: 'sched-status--stuck', stuck: true };
+      }
+      // storyFiredAt set: count actual story results
+      const storyResults = results.filter(r => r.kind === 'story');
+      const expectedCount = (j.fbPages || []).length;
+      if (storyResults.length < expectedCount) {
+        // Some pages never reported — partial failure
+        return { label: '⚠️ ไม่ครบ', cls: 'sched-status--stuck', stuck: true };
+      }
+      const storyErrs = storyResults.some(r => !r.ok);
+      if (storyErrs || hasErr) {
+        return { label: 'มี error', cls: 'sched-status--error' };
+      }
+      return { label: 'สำเร็จ', cls: 'sched-status--done' };
     }
+
+    // Non-story scheduled (FB Feed/YT only) — relies on platform-native scheduling
     return hasErr
       ? { label: 'มี error', cls: 'sched-status--error' }
       : { label: 'สำเร็จ', cls: 'sched-status--done' };
@@ -970,7 +990,41 @@
       wrap.innerHTML = '<div class="muted-sm">ยังไม่มีรายการ</div>';
       return;
     }
-    wrap.innerHTML = jobs.map(j => {
+
+    // Count statuses for summary banner
+    const counts = { stuck: 0, waiting: 0, error: 0, done: 0 };
+    jobs.forEach(j => {
+      const s = jobOverallStatus(j);
+      if (s.stuck) counts.stuck++;
+      else if (s.cls === 'sched-status--scheduled') counts.waiting++;
+      else if (s.cls === 'sched-status--error') counts.error++;
+      else counts.done++;
+    });
+
+    let banner = '';
+    if (counts.stuck > 0) {
+      banner = `
+        <div class="stuck-banner">
+          <div>
+            <strong>⚠️ มี ${counts.stuck} รายการค้าง</strong> — เลยเวลาแล้วแต่ extension ไม่ได้ยิง
+            <div class="muted-sm" style="margin-top:4px">เกิดจาก Service Worker ถูกฆ่ากลางทาง · กดปุ่มด้านล่างเพื่อลองอีกครั้ง</div>
+          </div>
+          <button id="bannerRecover" class="btn btn-primary btn-sm" type="button">🚑 กู้ทั้งหมด</button>
+        </div>
+      `;
+    }
+
+    const summaryLine = `
+      <div class="sched-summary muted-sm">
+        ทั้งหมด ${jobs.length} รายการ ·
+        ${counts.waiting > 0 ? `<span style="color:#93c5fd">รอเวลา ${counts.waiting}</span> · ` : ''}
+        ${counts.stuck > 0 ? `<span style="color:#fbbf24">ค้าง ${counts.stuck}</span> · ` : ''}
+        ${counts.error > 0 ? `<span style="color:#fca5a5">error ${counts.error}</span> · ` : ''}
+        <span style="color:#6ee7b7">สำเร็จ ${counts.done}</span>
+      </div>
+    `;
+
+    const cards = jobs.map(j => {
       const status = jobOverallStatus(j);
       const fireLine = j.fireAt
         ? `<span class="job-when">⏰ ${escHtml(fmtTime(j.fireAt))}</span> <span class="job-countdown muted-sm">${escHtml(fmtCountdown(j.fireAt))}</span>`
@@ -1003,6 +1057,22 @@
         </div>
       `;
     }).join('');
+
+    wrap.innerHTML = banner + summaryLine + cards;
+
+    const bannerBtn = $('bannerRecover');
+    if (bannerBtn) {
+      bannerBtn.addEventListener('click', async () => {
+        bannerBtn.disabled = true;
+        bannerBtn.textContent = 'กำลังกู้...';
+        const r = await sendExt({ type: 'RECOVER_NOW' }, 300000);
+        await loadScheduled();
+        if (!r || !r.ok) {
+          alert('กู้ไม่สำเร็จ: ' + ((r && r.error) || 'unknown'));
+        }
+      });
+    }
+
     wrap.querySelectorAll('[data-del]').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!confirm('ลบรายการนี้?')) return;
