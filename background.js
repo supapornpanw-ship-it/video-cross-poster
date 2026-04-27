@@ -115,67 +115,137 @@ async function logEvent(type, msg, extra) {
   } catch (_) {}
 }
 
-// ───────── Story upload core — used by alarm + recovery + manual retry
+// ───────── In-memory lock to prevent double-firing the same job
+// (e.g. recoverMissedJobs racing with chrome.alarms.onAlarm).
+const firingJobs = new Set();
+
+// Append a single page result to a job atomically. Each call does a
+// read-modify-write so partial progress survives even if SW is killed
+// later in the run.
+async function appendPageResult(jobId, pageResult, opts) {
+  const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+  const next = cur.map(j => {
+    if (j.id !== jobId) return j;
+    // Skip duplicates (in case of retry firing same page twice)
+    const dup = (j.results || []).some(r =>
+      r.kind === 'story' && r.pageId === pageResult.pageId && r.ok === pageResult.ok
+    );
+    if (dup) return j;
+    const merged = { ...j };
+    merged.results = [...(merged.results || []), pageResult];
+    if (opts && opts.markFired) {
+      merged.storyFiredAt = Date.now();
+      const allStoryOk = merged.results
+        .filter(r => r.kind === 'story')
+        .every(r => r.ok);
+      merged.status = allStoryOk ? 'done' : 'partial';
+    }
+    return merged;
+  });
+  await chrome.storage.local.set({ scheduled_jobs: next });
+}
+
+// ───────── Story upload core — used by alarm + recovery + manual retry.
+// Uploads ALL pages in parallel and saves each result as it completes.
+// Survives SW termination mid-run because partial progress is persisted.
 async function fireStoryJob(jobId) {
-  await logEvent('story_fire', 'start', { jobId });
-  let rec;
-  try {
-    rec = await idbGet(`story_${jobId}`);
-  } catch (e) {
-    await logEvent('story_fire', 'idb_error', { jobId, err: e.message });
-    return { ok: false, error: 'idb_error: ' + e.message };
+  if (firingJobs.has(jobId)) {
+    await logEvent('story_fire', 'already_firing', { jobId });
+    return { ok: false, error: 'already_firing' };
   }
-  if (!rec || !rec.blob || !Array.isArray(rec.pages)) {
-    await logEvent('story_fire', 'no_record', { jobId });
-    // Mark job as failed if no blob — so UI can show error
+  firingJobs.add(jobId);
+  await logEvent('story_fire', 'start', { jobId });
+
+  try {
+    let rec;
     try {
-      const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
-      const next = cur.map(j => {
+      rec = await idbGet(`story_${jobId}`);
+    } catch (e) {
+      await logEvent('story_fire', 'idb_error', { jobId, err: e.message });
+      return { ok: false, error: 'idb_error: ' + e.message };
+    }
+    if (!rec || !rec.blob || !Array.isArray(rec.pages)) {
+      await logEvent('story_fire', 'no_record', { jobId });
+      // Mark job as failed if no blob — so UI can show explicit error
+      try {
+        const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+        const next = cur.map(j => {
+          if (j.id !== jobId) return j;
+          if (j.storyFiredAt) return j;
+          return {
+            ...j,
+            storyFiredAt: Date.now(),
+            status: 'partial',
+            results: [...(j.results || []), {
+              kind: 'story_sched', ok: false,
+              error: 'ไฟล์หายจาก IndexedDB — อาจถูก Chrome เคลียร์ storage'
+            }]
+          };
+        });
+        await chrome.storage.local.set({ scheduled_jobs: next });
+      } catch (_) {}
+      return { ok: false, error: 'no_record' };
+    }
+
+    // Identify pages that haven't been successfully posted yet (idempotent retry).
+    const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+    const job = cur.find(j => j.id === jobId);
+    const alreadyDone = new Set(
+      ((job && job.results) || [])
+        .filter(r => r.kind === 'story' && r.ok)
+        .map(r => r.pageId)
+    );
+    const pagesToFire = rec.pages.filter(p => !alreadyDone.has(p.id));
+    await logEvent('story_fire', 'pages_planned', {
+      jobId, total: rec.pages.length, todo: pagesToFire.length, alreadyDone: alreadyDone.size
+    });
+
+    // Fire all pages in parallel. Each page persists its result individually
+    // so SW death doesn't lose data.
+    const results = await Promise.all(pagesToFire.map(async (p) => {
+      const result = { kind: 'story', pageId: p.id, pageName: p.name };
+      try {
+        const out = await bgUploadStory(p, rec.blob);
+        Object.assign(result, { ok: true, id: out.id });
+        await logEvent('story_fire', 'page_ok', { jobId, page: p.name, id: out.id });
+      } catch (e) {
+        Object.assign(result, { ok: false, error: e.message });
+        await logEvent('story_fire', 'page_err', { jobId, page: p.name, err: e.message });
+      }
+      // Persist immediately — survives SW kill
+      try { await appendPageResult(jobId, result); } catch (_) {}
+      return result;
+    }));
+
+    // Final pass: mark job as fired + cleanup blob
+    try {
+      const cur2 = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+      const next = cur2.map(j => {
         if (j.id !== jobId) return j;
-        if (j.storyFiredAt) return j;
+        const allStoryOk = (j.results || [])
+          .filter(r => r.kind === 'story')
+          .every(r => r.ok);
+        const totalStorySuccess = (j.results || [])
+          .filter(r => r.kind === 'story' && r.ok).length;
         return {
           ...j,
           storyFiredAt: Date.now(),
-          status: 'partial',
-          results: [...(j.results || []), {
-            kind: 'story_sched', ok: false,
-            error: 'ไฟล์หายจาก IndexedDB — อาจถูก Chrome เคลียร์ storage'
-          }]
+          status: (allStoryOk && totalStorySuccess >= rec.pages.length) ? 'done' : 'partial'
         };
       });
       await chrome.storage.local.set({ scheduled_jobs: next });
-    } catch (_) {}
-    return { ok: false, error: 'no_record' };
-  }
-  const results = [];
-  for (const p of rec.pages) {
-    try {
-      const out = await bgUploadStory(p, rec.blob);
-      results.push({ kind: 'story', pageId: p.id, pageName: p.name, ok: true, id: out.id });
-      await logEvent('story_fire', 'page_ok', { jobId, page: p.name, id: out.id });
+      // Only delete blob if all pages succeeded — keep for retry otherwise
+      const allOk = results.every(r => r.ok) && alreadyDone.size + results.length >= rec.pages.length;
+      if (allOk) await idbDel(`story_${jobId}`);
     } catch (e) {
-      results.push({ kind: 'story', pageId: p.id, pageName: p.name, ok: false, error: e.message });
-      await logEvent('story_fire', 'page_err', { jobId, page: p.name, err: e.message });
+      await logEvent('story_fire', 'save_err', { jobId, err: e.message });
     }
+
+    await logEvent('story_fire', 'done', { jobId, fired: results.length });
+    return { ok: true, results };
+  } finally {
+    firingJobs.delete(jobId);
   }
-  try {
-    const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
-    const next = cur.map(j => {
-      if (j.id !== jobId) return j;
-      const merged = { ...j };
-      merged.results = [...(merged.results || []), ...results];
-      const allOk = merged.results.every(x => x.ok);
-      merged.status = allOk ? 'done' : 'partial';
-      merged.storyFiredAt = Date.now();
-      return merged;
-    });
-    await chrome.storage.local.set({ scheduled_jobs: next });
-    await idbDel(`story_${jobId}`);
-  } catch (e) {
-    await logEvent('story_fire', 'save_err', { jobId, err: e.message });
-  }
-  await logEvent('story_fire', 'done', { jobId, results });
-  return { ok: true, results };
 }
 
 // ───────── Recovery — runs on SW startup. If laptop slept past fireAt
