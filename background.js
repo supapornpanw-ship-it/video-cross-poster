@@ -105,27 +105,60 @@ chrome.action.onClicked.addListener(async () => {
   await chrome.tabs.create({ url: APP_URL });
 });
 
-// ───────── Alarm handler — fires when scheduled story time arrives
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (!alarm || !alarm.name || !alarm.name.startsWith('story_')) return;
-  const jobId = alarm.name.slice('story_'.length);
-  console.log('[VP] story alarm fired:', jobId);
+// ───────── Event log (last 200 entries persisted for debugging)
+async function logEvent(type, msg, extra) {
   try {
-    const rec = await idbGet(`story_${jobId}`);
-    if (!rec || !rec.blob || !Array.isArray(rec.pages)) {
-      console.warn('[VP] no IDB record for', jobId);
-      return;
+    const cur = (await chrome.storage.local.get('vp_event_log')).vp_event_log || [];
+    cur.push({ ts: Date.now(), type, msg, extra: extra || null });
+    while (cur.length > 200) cur.shift();
+    await chrome.storage.local.set({ vp_event_log: cur });
+  } catch (_) {}
+}
+
+// ───────── Story upload core — used by alarm + recovery + manual retry
+async function fireStoryJob(jobId) {
+  await logEvent('story_fire', 'start', { jobId });
+  let rec;
+  try {
+    rec = await idbGet(`story_${jobId}`);
+  } catch (e) {
+    await logEvent('story_fire', 'idb_error', { jobId, err: e.message });
+    return { ok: false, error: 'idb_error: ' + e.message };
+  }
+  if (!rec || !rec.blob || !Array.isArray(rec.pages)) {
+    await logEvent('story_fire', 'no_record', { jobId });
+    // Mark job as failed if no blob — so UI can show error
+    try {
+      const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+      const next = cur.map(j => {
+        if (j.id !== jobId) return j;
+        if (j.storyFiredAt) return j;
+        return {
+          ...j,
+          storyFiredAt: Date.now(),
+          status: 'partial',
+          results: [...(j.results || []), {
+            kind: 'story_sched', ok: false,
+            error: 'ไฟล์หายจาก IndexedDB — อาจถูก Chrome เคลียร์ storage'
+          }]
+        };
+      });
+      await chrome.storage.local.set({ scheduled_jobs: next });
+    } catch (_) {}
+    return { ok: false, error: 'no_record' };
+  }
+  const results = [];
+  for (const p of rec.pages) {
+    try {
+      const out = await bgUploadStory(p, rec.blob);
+      results.push({ kind: 'story', pageId: p.id, pageName: p.name, ok: true, id: out.id });
+      await logEvent('story_fire', 'page_ok', { jobId, page: p.name, id: out.id });
+    } catch (e) {
+      results.push({ kind: 'story', pageId: p.id, pageName: p.name, ok: false, error: e.message });
+      await logEvent('story_fire', 'page_err', { jobId, page: p.name, err: e.message });
     }
-    const results = [];
-    for (const p of rec.pages) {
-      try {
-        const out = await bgUploadStory(p, rec.blob);
-        results.push({ kind: 'story', pageId: p.id, pageName: p.name, ok: true, id: out.id });
-      } catch (e) {
-        results.push({ kind: 'story', pageId: p.id, pageName: p.name, ok: false, error: e.message });
-      }
-    }
-    // Merge into scheduled_jobs
+  }
+  try {
     const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
     const next = cur.map(j => {
       if (j.id !== jobId) return j;
@@ -138,11 +171,54 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     });
     await chrome.storage.local.set({ scheduled_jobs: next });
     await idbDel(`story_${jobId}`);
-    console.log('[VP] story alarm complete:', jobId, results);
   } catch (e) {
-    console.error('[VP] story alarm error:', e);
+    await logEvent('story_fire', 'save_err', { jobId, err: e.message });
   }
+  await logEvent('story_fire', 'done', { jobId, results });
+  return { ok: true, results };
+}
+
+// ───────── Recovery — runs on SW startup. If laptop slept past fireAt
+// or alarm got dropped, this catches up jobs whose blob is still in IDB.
+async function recoverMissedJobs() {
+  try {
+    const jobs = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+    const now = Date.now();
+    let recovered = 0;
+    for (const j of jobs) {
+      if (!j.storyEnabled) continue;
+      if (!j.fireAt) continue;
+      if (j.storyFiredAt) continue;
+      if (j.fireAt > now) continue; // not due yet — alarm will handle
+      const alarm = await chrome.alarms.get(`story_${j.id}`);
+      if (alarm && alarm.scheduledTime > now) continue; // alarm rescheduled future
+      await logEvent('recover', 'firing_missed', {
+        jobId: j.id, fireAt: j.fireAt, lateBySec: Math.floor((now - j.fireAt) / 1000)
+      });
+      await fireStoryJob(j.id);
+      recovered++;
+    }
+    if (recovered > 0) {
+      await logEvent('recover', 'completed', { recovered });
+    }
+  } catch (e) {
+    await logEvent('recover', 'error', { err: e.message });
+  }
+}
+
+// ───────── Alarm handler — fires when scheduled story time arrives
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (!alarm || !alarm.name || !alarm.name.startsWith('story_')) return;
+  const jobId = alarm.name.slice('story_'.length);
+  await logEvent('alarm', 'fired', { jobId, scheduledTime: alarm.scheduledTime, lateMs: Date.now() - alarm.scheduledTime });
+  await fireStoryJob(jobId);
 });
+
+// Run recovery on every SW startup (also catches missed alarms after laptop sleep).
+chrome.runtime.onStartup.addListener(() => { recoverMissedJobs(); });
+chrome.runtime.onInstalled.addListener(() => { recoverMissedJobs(); });
+// Also run immediately on SW boot (covers SW being woken by other events).
+recoverMissedJobs();
 
 function deriveApiBase(sender) {
   try {
@@ -487,6 +563,55 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
 
         case 'CLEAR_JOBS': {
           await chrome.storage.local.set({ scheduled_jobs: [] });
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'DEBUG_DUMP': {
+          const alarms = await chrome.alarms.getAll();
+          const data = await chrome.storage.local.get(['scheduled_jobs', 'vp_event_log']);
+          // List IDB story_ keys
+          let idbKeys = [];
+          try {
+            const db = await openIdb();
+            const tx = db.transaction(IDB_STORE, 'readonly');
+            const store = tx.objectStore(IDB_STORE);
+            idbKeys = await new Promise((resolve, reject) => {
+              const req = store.getAllKeys();
+              req.onsuccess = () => resolve(req.result || []);
+              req.onerror = () => reject(req.error);
+            });
+          } catch (_) {}
+          sendResponse({
+            ok: true,
+            now: Date.now(),
+            alarms: alarms.map(a => ({
+              name: a.name,
+              scheduledTime: a.scheduledTime,
+              minsFromNow: Math.round((a.scheduledTime - Date.now()) / 60000)
+            })),
+            jobCount: (data.scheduled_jobs || []).length,
+            idbKeys,
+            eventLog: data.vp_event_log || []
+          });
+          break;
+        }
+
+        case 'RETRY_STORY_JOB': {
+          // Manually re-fire a story job (uses IDB blob if still present).
+          const out = await fireStoryJob(req.jobId);
+          sendResponse(out);
+          break;
+        }
+
+        case 'RECOVER_NOW': {
+          await recoverMissedJobs();
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'CLEAR_EVENT_LOG': {
+          await chrome.storage.local.set({ vp_event_log: [] });
           sendResponse({ ok: true });
           break;
         }

@@ -975,6 +975,14 @@
       const fireLine = j.fireAt
         ? `<span class="job-when">⏰ ${escHtml(fmtTime(j.fireAt))}</span> <span class="job-countdown muted-sm">${escHtml(fmtCountdown(j.fireAt))}</span>`
         : `<span class="job-when">📤 โพสทันที</span>`;
+      // Show retry button if it's a story-scheduled job that's past due and either
+      // didn't fire or fired with errors.
+      const now = Date.now();
+      const showRetry = j.storyEnabled && j.fireAt && j.fireAt < now &&
+        (!j.storyFiredAt || (j.results || []).some(r => r.kind === 'story' && !r.ok));
+      const retryBtn = showRetry
+        ? `<button class="btn btn-ghost btn-sm" data-retry="${escHtml(j.id)}" type="button">🔁 ลองโพสสตอรี่ใหม่</button>`
+        : '';
       return `
         <div class="job-card">
           <div class="job-head">
@@ -984,6 +992,7 @@
             </div>
             <div class="job-head-right">
               <span class="sched-status ${status.cls}">${escHtml(status.label)}</span>
+              ${retryBtn}
               <button class="btn btn-ghost btn-sm" data-del="${escHtml(j.id)}" type="button">ลบ</button>
             </div>
           </div>
@@ -998,6 +1007,18 @@
       btn.addEventListener('click', async () => {
         if (!confirm('ลบรายการนี้?')) return;
         await sendExt({ type: 'DEL_JOB', id: btn.dataset.del });
+        loadScheduled();
+      });
+    });
+    wrap.querySelectorAll('[data-retry]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        btn.textContent = 'กำลังยิง...';
+        const r = await sendExt({ type: 'RETRY_STORY_JOB', jobId: btn.dataset.retry }, 300000);
+        if (!r || !r.ok) {
+          alert('ลองใหม่ไม่สำเร็จ: ' + ((r && r.error) || 'unknown') +
+            (r && r.error === 'no_record' ? '\n\nไฟล์อาจถูกเคลียร์จาก IndexedDB แล้ว — ต้องตั้งโพสใหม่' : ''));
+        }
         loadScheduled();
       });
     });
@@ -1183,6 +1204,61 @@
       if (!confirm('ล้างรายการทั้งหมด?')) return;
       await sendExt({ type: 'CLEAR_JOBS' });
       loadScheduled();
+    });
+
+    $('recoverNow').addEventListener('click', async () => {
+      const r = await sendExt({ type: 'RECOVER_NOW' }, 60000);
+      if (!r || !r.ok) return alert('กู้ไม่สำเร็จ: ' + ((r && r.error) || 'unknown'));
+      await loadScheduled();
+      alert('✅ ลองกู้รายการที่พลาดแล้ว — ดูสถานะในรายการด้านบน หรือกด Debug ดู log');
+    });
+
+    $('showDebug').addEventListener('click', async () => {
+      const box = $('debugBox');
+      if (box.hidden) {
+        const r = await sendExt({ type: 'DEBUG_DUMP' });
+        if (!r || !r.ok) return alert('โหลด debug ไม่สำเร็จ');
+        const fmtTs = (ts) => new Date(ts).toLocaleString('th-TH');
+        let txt = '';
+        txt += `🕐 เวลาปัจจุบัน: ${fmtTs(r.now)}\n`;
+        txt += `📋 จำนวน scheduled jobs: ${r.jobCount}\n\n`;
+        txt += `⏰ Pending alarms (${r.alarms.length}):\n`;
+        if (!r.alarms.length) {
+          txt += '  (ไม่มี)\n';
+        } else {
+          r.alarms.forEach(a => {
+            txt += `  • ${a.name} → ${fmtTs(a.scheduledTime)} (${a.minsFromNow >= 0 ? 'อีก ' + a.minsFromNow : 'เลยมา ' + (-a.minsFromNow)} นาที)\n`;
+          });
+        }
+        txt += `\n📦 IndexedDB keys (${r.idbKeys.length}):\n`;
+        if (!r.idbKeys.length) txt += '  (ว่าง)\n';
+        else r.idbKeys.forEach(k => txt += `  • ${k}\n`);
+        txt += `\n📜 Event log (ใหม่ → เก่า, ${r.eventLog.length} entries):\n`;
+        if (!r.eventLog.length) txt += '  (ยังไม่มี event)\n';
+        else r.eventLog.slice().reverse().forEach(ev => {
+          txt += `  [${fmtTs(ev.ts)}] ${ev.type}/${ev.msg}`;
+          if (ev.extra) txt += ` ${JSON.stringify(ev.extra)}`;
+          txt += '\n';
+        });
+        $('debugContent').textContent = txt;
+        box.hidden = false;
+      } else {
+        box.hidden = true;
+      }
+    });
+    $('closeDebug').addEventListener('click', () => { $('debugBox').hidden = true; });
+    $('copyDebug').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText($('debugContent').textContent);
+        alert('คัดลอกแล้ว');
+      } catch (_) {
+        alert('คัดลอกเองจากกล่องด้านล่าง');
+      }
+    });
+    $('clearLog').addEventListener('click', async () => {
+      if (!confirm('ล้าง event log?')) return;
+      await sendExt({ type: 'CLEAR_EVENT_LOG' });
+      $('debugBox').hidden = true;
     });
   }
 

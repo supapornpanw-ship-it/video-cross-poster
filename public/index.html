@@ -212,7 +212,17 @@
       </div>
       <div class="action-bar">
         <button id="refreshSched" class="btn btn-ghost btn-sm" type="button">🔄 รีเฟรช</button>
+        <button id="recoverNow" class="btn btn-ghost btn-sm" type="button">🚑 กู้รายการที่พลาด</button>
+        <button id="showDebug" class="btn btn-ghost btn-sm" type="button">🔍 Debug</button>
         <button id="clearSched" class="btn btn-ghost btn-sm" type="button">ล้างรายการทั้งหมด</button>
+      </div>
+      <div id="debugBox" class="manual-box" hidden style="margin-top:12px">
+        <div class="action-bar" style="margin-bottom:10px">
+          <button id="copyDebug" class="btn btn-ghost btn-sm" type="button">📋 คัดลอก</button>
+          <button id="clearLog" class="btn btn-ghost btn-sm" type="button">ล้าง log</button>
+          <button id="closeDebug" class="btn btn-ghost btn-sm" type="button">ปิด</button>
+        </div>
+        <pre id="debugContent" style="margin:0;padding:12px;background:#11141a;border-radius:6px;overflow:auto;max-height:400px;font-size:12px;line-height:1.4;white-space:pre-wrap;word-break:break-all"></pre>
       </div>
     </section>
 
