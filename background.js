@@ -667,8 +667,65 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
         }
 
         case 'CLEAR_JOBS': {
+          // Wipe scheduled_jobs array, all story_ alarms, and ALL story_ blobs
+          // (including orphans from previous incomplete clears).
+          const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
           await chrome.storage.local.set({ scheduled_jobs: [] });
-          sendResponse({ ok: true });
+          // Clear per-job alarms
+          for (const j of cur) {
+            try { await chrome.alarms.clear(`story_${j.id}`); } catch (_) {}
+          }
+          // Sweep ALL story_ keys from IDB (catches orphans too)
+          let cleared = 0;
+          try {
+            const db = await openIdb();
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            const store = tx.objectStore(IDB_STORE);
+            const keys = await new Promise((resolve, reject) => {
+              const r = store.getAllKeys();
+              r.onsuccess = () => resolve(r.result || []);
+              r.onerror = () => reject(r.error);
+            });
+            for (const k of keys) {
+              if (typeof k === 'string' && k.startsWith('story_')) {
+                store.delete(k);
+                cleared++;
+              }
+            }
+          } catch (e) {
+            await logEvent('clear_jobs', 'idb_error', { err: e.message });
+          }
+          await logEvent('clear_jobs', 'done', { jobsCleared: cur.length, blobsCleared: cleared });
+          sendResponse({ ok: true, jobsCleared: cur.length, blobsCleared: cleared });
+          break;
+        }
+
+        case 'CLEAN_ORPHAN_BLOBS': {
+          // Delete IDB story_ blobs whose jobId is no longer in scheduled_jobs.
+          const jobs = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+          const validIds = new Set(jobs.map(j => `story_${j.id}`));
+          let cleared = 0;
+          try {
+            const db = await openIdb();
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            const store = tx.objectStore(IDB_STORE);
+            const keys = await new Promise((resolve, reject) => {
+              const r = store.getAllKeys();
+              r.onsuccess = () => resolve(r.result || []);
+              r.onerror = () => reject(r.error);
+            });
+            for (const k of keys) {
+              if (typeof k === 'string' && k.startsWith('story_') && !validIds.has(k)) {
+                store.delete(k);
+                cleared++;
+              }
+            }
+          } catch (e) {
+            sendResponse({ ok: false, error: e.message });
+            break;
+          }
+          await logEvent('clean_orphans', 'done', { cleared });
+          sendResponse({ ok: true, cleared });
           break;
         }
 

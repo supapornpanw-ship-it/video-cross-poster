@@ -1306,6 +1306,13 @@
       alert('✅ ลองกู้รายการที่พลาดแล้ว — ดูสถานะในรายการด้านบน หรือกด Debug ดู log');
     });
 
+    $('cleanOrphans').addEventListener('click', async () => {
+      if (!confirm('ลบ blob ใน IndexedDB ที่ไม่มี job ตรงกัน? (จะคืนพื้นที่ disk)')) return;
+      const r = await sendExt({ type: 'CLEAN_ORPHAN_BLOBS' }, 30000);
+      if (!r || !r.ok) return alert('ล้างไม่สำเร็จ: ' + ((r && r.error) || 'unknown'));
+      alert(`✅ ลบ orphan blob ${r.cleared || 0} ตัว`);
+    });
+
     $('showDebug').addEventListener('click', async () => {
       const box = $('debugBox');
       if (box.hidden) {
