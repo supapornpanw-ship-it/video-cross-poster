@@ -276,18 +276,53 @@ async function recoverMissedJobs() {
   }
 }
 
-// ───────── Alarm handler — fires when scheduled story time arrives
+// ───────── Heartbeat: fires every 1 minute to wake SW and scan for due jobs.
+// This is the canonical MV3 pattern — single-shot `when:` alarms are unreliable
+// because Chrome aggressively terminates idle SWs and macOS sleep/App Nap can
+// drop scheduled wake-ups entirely.
+const HEARTBEAT_NAME = 'vp_heartbeat';
+async function ensureHeartbeat() {
+  const existing = await chrome.alarms.get(HEARTBEAT_NAME);
+  if (!existing) {
+    await chrome.alarms.create(HEARTBEAT_NAME, {
+      delayInMinutes: 1,
+      periodInMinutes: 1
+    });
+    await logEvent('heartbeat', 'created');
+  }
+}
+
+// ───────── Alarm handler — story_ alarms fire at scheduled time;
+// vp_heartbeat fires every minute to catch anything missed.
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (!alarm || !alarm.name || !alarm.name.startsWith('story_')) return;
-  const jobId = alarm.name.slice('story_'.length);
-  await logEvent('alarm', 'fired', { jobId, scheduledTime: alarm.scheduledTime, lateMs: Date.now() - alarm.scheduledTime });
-  await fireStoryJob(jobId);
+  if (!alarm || !alarm.name) return;
+  if (alarm.name === HEARTBEAT_NAME) {
+    await recoverMissedJobs();
+    return;
+  }
+  if (alarm.name.startsWith('story_')) {
+    const jobId = alarm.name.slice('story_'.length);
+    await logEvent('alarm', 'fired', {
+      jobId, scheduledTime: alarm.scheduledTime,
+      lateMs: Date.now() - alarm.scheduledTime
+    });
+    await fireStoryJob(jobId);
+    // Also run a sweep — catches any other due jobs whose alarms were dropped.
+    await recoverMissedJobs();
+  }
 });
 
-// Run recovery on every SW startup (also catches missed alarms after laptop sleep).
-chrome.runtime.onStartup.addListener(() => { recoverMissedJobs(); });
-chrome.runtime.onInstalled.addListener(() => { recoverMissedJobs(); });
-// Also run immediately on SW boot (covers SW being woken by other events).
+// Set up heartbeat + run recovery on all SW lifecycle events.
+chrome.runtime.onStartup.addListener(async () => {
+  await ensureHeartbeat();
+  await recoverMissedJobs();
+});
+chrome.runtime.onInstalled.addListener(async () => {
+  await ensureHeartbeat();
+  await recoverMissedJobs();
+});
+// Top-level: runs on every SW boot (alarm wake, message wake, etc.)
+ensureHeartbeat();
 recoverMissedJobs();
 
 function deriveApiBase(sender) {
