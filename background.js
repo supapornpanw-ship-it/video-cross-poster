@@ -152,34 +152,103 @@ function deriveApiBase(sender) {
 }
 
 async function refreshYtAccessToken(apiBase) {
-  const { yt_refresh_token, yt_access_token, yt_access_expires } =
-    await chrome.storage.local.get(['yt_refresh_token', 'yt_access_token', 'yt_access_expires']);
-  if (!yt_refresh_token) {
+  const data = await chrome.storage.local.get([
+    'yt_refresh_token', 'yt_access_token', 'yt_access_expires',
+    'yt_client_id', 'yt_client_secret'
+  ]);
+  if (!data.yt_refresh_token) {
     return { ok: false, error: 'not_connected' };
   }
   const now = Date.now();
-  if (yt_access_token && yt_access_expires && now < yt_access_expires - 60000) {
-    return { ok: true, accessToken: yt_access_token, cached: true };
+  if (data.yt_access_token && data.yt_access_expires && now < data.yt_access_expires - 60000) {
+    return { ok: true, accessToken: data.yt_access_token, cached: true };
   }
-  if (!apiBase) return { ok: false, error: 'no_api_base' };
 
-  const r = await fetch(`${apiBase}/api/yt-refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refresh_token: yt_refresh_token })
-  });
-  let d;
-  try { d = await r.json(); } catch (_) { d = {}; }
-  if (!r.ok || d.error) {
-    return { ok: false, error: d.error || `HTTP ${r.status}` };
+  let newAccess, expiresIn;
+
+  // If user pasted their own creds, refresh directly with Google.
+  if (data.yt_client_id && data.yt_client_secret) {
+    const body = new URLSearchParams({
+      client_id: data.yt_client_id,
+      client_secret: data.yt_client_secret,
+      refresh_token: data.yt_refresh_token,
+      grant_type: 'refresh_token'
+    });
+    const r = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+    let d; try { d = await r.json(); } catch (_) { d = {}; }
+    if (!r.ok || d.error) {
+      return { ok: false, error: d.error_description || d.error || `HTTP ${r.status}` };
+    }
+    newAccess = d.access_token;
+    expiresIn = d.expires_in || 3600;
+  } else {
+    // Fallback: server-side refresh (uses app's default secret on Vercel)
+    if (!apiBase) return { ok: false, error: 'no_api_base' };
+    const r = await fetch(`${apiBase}/api/yt-refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: data.yt_refresh_token })
+    });
+    let d; try { d = await r.json(); } catch (_) { d = {}; }
+    if (!r.ok || d.error) {
+      return { ok: false, error: d.error || `HTTP ${r.status}` };
+    }
+    newAccess = d.access_token;
+    expiresIn = d.expires_in || 3600;
   }
-  const newAccess = d.access_token;
-  const expiresIn = d.expires_in || 3600;
+
   await chrome.storage.local.set({
     yt_access_token: newAccess,
     yt_access_expires: now + expiresIn * 1000
   });
   return { ok: true, accessToken: newAccess, cached: false };
+}
+
+// Exchange authorization code → tokens using user-pasted creds.
+async function exchangeYtCode(code, redirectUri) {
+  const data = await chrome.storage.local.get(['yt_client_id', 'yt_client_secret']);
+  if (!data.yt_client_id || !data.yt_client_secret) {
+    return { ok: false, error: 'no_creds_saved' };
+  }
+  const body = new URLSearchParams({
+    code,
+    client_id: data.yt_client_id,
+    client_secret: data.yt_client_secret,
+    redirect_uri: redirectUri,
+    grant_type: 'authorization_code'
+  });
+  const r = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  let d; try { d = await r.json(); } catch (_) { d = {}; }
+  if (!r.ok || d.error) {
+    return { ok: false, error: d.error_description || d.error || `HTTP ${r.status}` };
+  }
+  // Fetch channel info with the new access token (best-effort).
+  let channel = null;
+  try {
+    const chR = await fetch(
+      'https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true',
+      { headers: { Authorization: `Bearer ${d.access_token}` } }
+    );
+    const chD = await chR.json();
+    if (chD.items && chD.items[0]) {
+      channel = { id: chD.items[0].id, title: chD.items[0].snippet && chD.items[0].snippet.title };
+    }
+  } catch (_) {}
+  return {
+    ok: true,
+    accessToken: d.access_token,
+    refreshToken: d.refresh_token || null,
+    expiresIn: d.expires_in || 3600,
+    channel
+  };
 }
 
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
@@ -266,6 +335,43 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
         case 'YT_GET_ACCESS_TOKEN': {
           const out = await refreshYtAccessToken(apiBase);
           sendResponse(out);
+          break;
+        }
+
+        case 'YT_EXCHANGE_CODE': {
+          const out = await exchangeYtCode(req.code, req.redirectUri);
+          sendResponse(out);
+          break;
+        }
+
+        case 'SAVE_YT_CREDS': {
+          await chrome.storage.local.set({
+            yt_client_id: req.clientId || null,
+            yt_client_secret: req.clientSecret || null
+          });
+          // Invalidate cached access token so next request refreshes with new creds.
+          await chrome.storage.local.remove(['yt_access_token', 'yt_access_expires']);
+          sendResponse({ ok: true });
+          break;
+        }
+
+        case 'GET_YT_CREDS': {
+          const d = await chrome.storage.local.get(['yt_client_id', 'yt_client_secret']);
+          sendResponse({
+            ok: true,
+            hasCreds: !!(d.yt_client_id && d.yt_client_secret),
+            clientId: d.yt_client_id || null
+            // never return secret to the page
+          });
+          break;
+        }
+
+        case 'CLEAR_YT_CREDS': {
+          await chrome.storage.local.remove([
+            'yt_client_id', 'yt_client_secret',
+            'yt_access_token', 'yt_access_expires'
+          ]);
+          sendResponse({ ok: true });
           break;
         }
 

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <title>YouTube OAuth — Video Cross-Poster</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <main class="container" style="text-align:center;padding-top:80px">
+    <div class="panel">
+      <h2 id="title">กำลังประมวลผล...</h2>
+      <div id="msg" class="muted-sm">รอสักครู่</div>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const params = new URLSearchParams(location.search);
+      const code = params.get('code');
+      const error = params.get('error');
+      const errDesc = params.get('error_description');
+      const title = document.getElementById('title');
+      const msg = document.getElementById('msg');
+
+      if (window.opener) {
+        window.opener.postMessage({
+          source: 'vp-yt-oauth-code',
+          code: code || null,
+          error: error || null,
+          errorDescription: errDesc || null,
+        }, '*');
+      }
+
+      if (error) {
+        title.textContent = '❌ Error';
+        msg.textContent = (errDesc || error);
+      } else if (code) {
+        title.textContent = '✅ เชื่อมต่อสำเร็จ';
+        msg.textContent = 'ปิดหน้านี้ได้เลย — กลับไปที่หน้า Video Cross-Poster';
+        setTimeout(() => { try { window.close(); } catch (_) {} }, 1500);
+      } else {
+        title.textContent = '⚠️ ไม่พบ code';
+        msg.textContent = 'OAuth callback ไม่ส่ง code กลับมา';
+      }
+    })();
+  </script>
+</body>
+</html>

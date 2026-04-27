@@ -339,18 +339,30 @@
   }
 
   // ───────── YouTube OAuth (popup → window.opener.postMessage)
-  function ytConnect() {
-    const CLIENT_ID = window.__GOOGLE_CLIENT_ID;
-    if (!CLIENT_ID) {
-      alert('ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID — ดู deployment instructions');
-      return;
+  // If user pasted own creds → use static /yt-callback.html and exchange in extension.
+  // Otherwise → use shared app creds via /api/yt-callback.
+  async function ytConnect() {
+    const credsR = await sendExt({ type: 'GET_YT_CREDS' });
+    const useOwn = credsR && credsR.ok && credsR.hasCreds;
+
+    let clientId, redirectUri;
+    if (useOwn) {
+      clientId = credsR.clientId;
+      redirectUri = location.origin + '/yt-callback.html';
+    } else {
+      clientId = window.__GOOGLE_CLIENT_ID;
+      if (!clientId) {
+        alert('ยังไม่ได้ตั้งค่า Client ID — กดปุ่ม "ใช้ Client ID ของฉัน" เพื่อใส่ creds ของตัวเอง');
+        return;
+      }
+      redirectUri = location.origin + '/api/yt-callback';
     }
-    const redirect = encodeURIComponent(location.origin + '/api/yt-callback');
+
     const scope = encodeURIComponent('https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly');
     const url =
       `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${CLIENT_ID}` +
-      `&redirect_uri=${redirect}` +
+      `client_id=${encodeURIComponent(clientId)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&response_type=code` +
       `&scope=${scope}` +
       `&access_type=offline` +
@@ -368,7 +380,7 @@
     renderConnections();
   }
 
-  // Handle the callback message
+  // Handle the SHARED-creds callback (server-side exchange via /api/yt-callback)
   window.addEventListener('message', async (e) => {
     if (!e.data || e.data.source !== 'vp-yt-oauth') return;
     const p = e.data.payload || {};
@@ -393,6 +405,41 @@
     }
     state.yt = { connected: true, channel: p.channel, email: null };
     renderConnections();
+  });
+
+  // Handle the OWN-creds callback (static /yt-callback.html → exchange in extension).
+  window.addEventListener('message', async (e) => {
+    if (!e.data || e.data.source !== 'vp-yt-oauth-code') return;
+    const { code, error, errorDescription } = e.data;
+    if (error) {
+      alert('YouTube auth failed: ' + (errorDescription || error));
+      return;
+    }
+    if (!code) return;
+    const redirectUri = location.origin + '/yt-callback.html';
+    const ex = await sendExt({ type: 'YT_EXCHANGE_CODE', code, redirectUri }, 30000);
+    if (!ex || !ex.ok) {
+      alert('แลก code → token ไม่สำเร็จ: ' + ((ex && ex.error) || 'unknown'));
+      return;
+    }
+    if (!ex.refreshToken) {
+      alert('YouTube ไม่ได้ส่ง refresh_token — revoke แอปที่ https://myaccount.google.com/permissions แล้วลองใหม่');
+      return;
+    }
+    const sr = await sendExt({
+      type: 'SAVE_YT',
+      refreshToken: ex.refreshToken,
+      accessToken: ex.accessToken,
+      accessTokenExpires: Date.now() + (ex.expiresIn || 3600) * 1000,
+      channel: ex.channel || null,
+    });
+    if (!sr.ok) {
+      alert('บันทึก token ไม่สำเร็จ: ' + (sr.error || ''));
+      return;
+    }
+    state.yt = { connected: true, channel: ex.channel, email: null };
+    renderConnections();
+    alert('✅ เชื่อมต่อ YouTube สำเร็จ (ใช้ creds ของคุณเอง)');
   });
 
   // ───────── Render: connections
@@ -1035,6 +1082,65 @@
     });
     $('ytConnect').addEventListener('click', ytConnect);
     $('ytDisconnect').addEventListener('click', ytDisconnect);
+
+    // ── YouTube own-credentials box
+    async function refreshYtCredsStatus() {
+      const r = await sendExt({ type: 'GET_YT_CREDS' });
+      const status = $('ytCredsStatus');
+      if (r && r.ok && r.hasCreds) {
+        const masked = r.clientId ? r.clientId.slice(0, 24) + '…' : '(saved)';
+        status.textContent = `✅ ใช้ creds ของคุณเอง — Client ID: ${masked}`;
+        status.style.color = '#6ee7b7';
+      } else {
+        status.textContent = '⚠️ ใช้ Client ID ของแอป (โควต้ารวม ~6 อัปโหลด/วัน กับคนอื่น)';
+        status.style.color = '';
+      }
+    }
+    $('ytToggleCreds').addEventListener('click', () => {
+      const box = $('ytCredsBox');
+      box.hidden = !box.hidden;
+      if (!box.hidden) {
+        $('ytRedirectUri').textContent = location.origin + '/yt-callback.html';
+        refreshYtCredsStatus();
+      }
+    });
+    $('ytRedirectUri').addEventListener('click', async () => {
+      const txt = $('ytRedirectUri').textContent;
+      try {
+        await navigator.clipboard.writeText(txt);
+        const orig = $('ytRedirectUri').textContent;
+        $('ytRedirectUri').textContent = '✓ คัดลอกแล้ว';
+        setTimeout(() => { $('ytRedirectUri').textContent = orig; }, 1200);
+      } catch (_) {
+        alert('คัดลอกเอง: ' + txt);
+      }
+    });
+    $('ytCredsSave').addEventListener('click', async () => {
+      const clientId = $('ytClientIdInput').value.trim();
+      const clientSecret = $('ytClientSecretInput').value.trim();
+      if (!clientId || !clientSecret) return alert('ใส่ทั้ง Client ID และ Client Secret');
+      if (!clientId.endsWith('.apps.googleusercontent.com')) {
+        if (!confirm('Client ID ดูแปลก ๆ (ปกติลงท้ายด้วย .apps.googleusercontent.com) — บันทึกต่อหรือไม่?')) return;
+      }
+      const r = await sendExt({ type: 'SAVE_YT_CREDS', clientId, clientSecret });
+      if (!r || !r.ok) return alert('บันทึกไม่สำเร็จ: ' + ((r && r.error) || 'unknown'));
+      $('ytClientIdInput').value = '';
+      $('ytClientSecretInput').value = '';
+      await refreshYtCredsStatus();
+      alert('✅ บันทึกแล้ว — กดปุ่ม "เชื่อมต่อ YouTube" อีกครั้งเพื่อ login ด้วย creds ของคุณ');
+    });
+    $('ytCredsClear').addEventListener('click', async () => {
+      if (!confirm('ล้าง Client ID + Secret ของคุณ? จะกลับไปใช้ของแอป (โควต้ารวมกับคนอื่น)')) return;
+      const r = await sendExt({ type: 'CLEAR_YT_CREDS' });
+      if (!r || !r.ok) return alert('ล้างไม่สำเร็จ: ' + ((r && r.error) || 'unknown'));
+      await refreshYtCredsStatus();
+      alert('✅ ล้างแล้ว — ครั้งหน้าเชื่อมต่อจะใช้ creds ของแอปแทน');
+    });
+    $('ytCredsCancel').addEventListener('click', () => {
+      $('ytCredsBox').hidden = true;
+      $('ytClientIdInput').value = '';
+      $('ytClientSecretInput').value = '';
+    });
 
     const fileZone = $('fileZone');
     fileZone.addEventListener('click', (e) => {

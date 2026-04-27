@@ -79,8 +79,33 @@
         </div>
         <div class="conn-actions">
           <button id="ytConnect" class="btn btn-primary">เชื่อมต่อ YouTube</button>
+          <button id="ytToggleCreds" class="btn btn-ghost" type="button">⚙️ ใช้ Client ID ของฉัน</button>
           <button id="ytDisconnect" class="btn btn-ghost" hidden>ยกเลิก</button>
         </div>
+      </div>
+      <div id="ytCredsBox" class="manual-box" hidden>
+        <div class="muted-sm" style="margin-bottom:10px">
+          YouTube ฟรีโควต้า = 10,000 units/วัน/แอป = <strong>~6 อัปโหลด/วัน รวมทุกคนที่ใช้แอปนี้</strong><br>
+          ถ้าอยากมีโควต้าของตัวเอง สร้าง Cloud Project ของตัวเอง แล้วใส่ Client ID + Secret ที่นี่
+          <br><br>
+          <strong>วิธีตั้ง:</strong><br>
+          1. ไป <a href="https://console.cloud.google.com/" target="_blank" rel="noopener" style="color:#3b82f6">Google Cloud Console</a> → สร้าง Project ใหม่<br>
+          2. APIs &amp; Services → Library → เปิดใช้งาน <code>YouTube Data API v3</code><br>
+          3. APIs &amp; Services → OAuth consent screen → External + Testing mode → ใส่ email ตัวเองใน Test users<br>
+          4. APIs &amp; Services → Credentials → Create Credentials → OAuth client ID → <strong>Web application</strong><br>
+          5. Authorized redirect URIs ใส่: <code id="ytRedirectUri" style="cursor:pointer" title="คลิกเพื่อคัดลอก">...</code><br>
+          6. กด Create → คัดลอก Client ID + Client Secret มาวางด้านล่าง
+        </div>
+        <label class="form-label" for="ytClientIdInput">Client ID</label>
+        <input type="text" id="ytClientIdInput" placeholder="123456789-abc...apps.googleusercontent.com" />
+        <label class="form-label" for="ytClientSecretInput" style="margin-top:10px">Client Secret</label>
+        <input type="text" id="ytClientSecretInput" placeholder="GOCSPX-..." />
+        <div class="action-bar" style="margin-top:10px">
+          <button id="ytCredsSave" class="btn btn-primary btn-sm" type="button">บันทึก</button>
+          <button id="ytCredsClear" class="btn btn-ghost btn-sm" type="button">ล้าง (กลับไปใช้ของแอป)</button>
+          <button id="ytCredsCancel" class="btn btn-ghost btn-sm" type="button">ปิด</button>
+        </div>
+        <div id="ytCredsStatus" class="muted-sm" style="margin-top:8px"></div>
       </div>
     </section>
 
