@@ -11,6 +11,7 @@
     yt: { connected: false, channel: null, email: null },
     selectedFile: null,
     uploading: false,
+    recovering: false,
   };
 
   // ───────── Utility
@@ -1036,7 +1037,10 @@
             <strong>⚠️ มี ${counts.stuck} รายการค้าง</strong> — เลยเวลาแล้วแต่ extension ไม่ได้ยิง
             <div class="muted-sm" style="margin-top:4px">เกิดจาก Service Worker ถูกฆ่ากลางทาง · กดปุ่มด้านล่างเพื่อลองอีกครั้ง</div>
           </div>
-          <button id="bannerRecover" class="btn btn-primary btn-sm" type="button">🚑 กู้ทั้งหมด</button>
+          <button id="bannerRecover" class="btn btn-primary btn-sm" type="button"
+            ${state.recovering ? 'disabled' : ''}>
+            ${state.recovering ? '⏳ กำลังกู้...' : '🚑 กู้ทั้งหมด'}
+          </button>
         </div>
       `;
     }
@@ -1090,9 +1094,11 @@
     const bannerBtn = $('bannerRecover');
     if (bannerBtn) {
       bannerBtn.addEventListener('click', async () => {
-        bannerBtn.disabled = true;
-        bannerBtn.textContent = 'กำลังกู้...';
+        if (state.recovering) return;
+        state.recovering = true;
+        await loadScheduled(); // re-render button as disabled immediately
         const r = await sendExt({ type: 'RECOVER_NOW' }, 300000);
+        state.recovering = false;
         await loadScheduled();
         if (!r || !r.ok) {
           alert('กู้ไม่สำเร็จ: ' + ((r && r.error) || 'unknown'));
