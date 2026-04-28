@@ -235,6 +235,35 @@ async function fireStoryJob(jobId) {
     // Final pass: mark job as fired + cleanup blob
     try {
       const cur2 = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
+      const job2 = cur2.find(j => j.id === jobId);
+      const retryCount = (job2 && job2.retryCount) || 0;
+
+      // If ALL new results are Facebook rate-limited (#4), auto-reschedule +1h instead of failing.
+      // (keeps the IDB blob and re-arms the alarm — up to 3 auto-retries)
+      const allRateLimited = results.length > 0 &&
+        results.every(r => !r.ok && r.error && r.error.includes('(#4)'));
+
+      if (allRateLimited && retryCount < 3) {
+        const retryAt = Date.now() + 60 * 60 * 1000;
+        const next2 = cur2.map(j => {
+          if (j.id !== jobId) return j;
+          return {
+            ...j,
+            fireAt: retryAt,
+            retryCount: retryCount + 1,
+            results: (j.results || []).filter(r => r.ok), // keep successes, drop rate-limit errors
+          };
+        });
+        await chrome.storage.local.set({ scheduled_jobs: next2 });
+        try { await chrome.alarms.clear(`story_${jobId}`); } catch (_) {}
+        await chrome.alarms.create(`story_${jobId}`, { when: retryAt });
+        await logEvent('story_fire', 'rate_limited_rescheduled', {
+          jobId, retryAt, attempt: retryCount + 1
+        });
+        broadcastStateChanged();
+        return { ok: false, error: 'rate_limited', rescheduled: true, retryAt };
+      }
+
       const next = cur2.map(j => {
         if (j.id !== jobId) return j;
         const allStoryOk = (j.results || [])

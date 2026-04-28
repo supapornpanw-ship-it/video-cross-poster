@@ -865,6 +865,10 @@
 
     // ── Scheduled job ──
     if (now < j.fireAt - 1000) {
+      if (j.retryCount > 0) {
+        const t = new Date(j.fireAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+        return { label: `🔄 ลองใหม่ ${t} (${j.retryCount}/3)`, cls: 'sched-status--scheduled' };
+      }
       return { label: 'รอเวลา', cls: 'sched-status--scheduled' };
     }
 
