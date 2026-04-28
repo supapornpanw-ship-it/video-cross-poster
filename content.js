@@ -22,3 +22,10 @@ window.addEventListener('message', (e) => {
 
 // Notify the page that the extension is loaded.
 window.postMessage({ source: 'vp-ext', type: 'READY' }, '*');
+
+// Forward background broadcasts (e.g. VP_STATE_CHANGED) to the web page.
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'VP_STATE_CHANGED') {
+    window.postMessage({ source: 'vp-ext', type: 'STATE_CHANGED' }, '*');
+  }
+});

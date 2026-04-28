@@ -103,6 +103,10 @@
       extReadyResolve();
       return;
     }
+    if (d.type === 'STATE_CHANGED') {
+      loadScheduled();
+      return;
+    }
     if (d.reqId && pending.has(d.reqId)) {
       const { resolve } = pending.get(d.reqId);
       pending.delete(d.reqId);

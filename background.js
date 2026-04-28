@@ -119,6 +119,20 @@ async function logEvent(type, msg, extra) {
 // (e.g. recoverMissedJobs racing with chrome.alarms.onAlarm).
 const firingJobs = new Set();
 
+// ───────── Push live state change to the web app tab so UI refreshes
+// immediately instead of waiting for the 30 s poll.
+async function broadcastStateChanged() {
+  try {
+    const APP_ORIGINS = ['https://video-cross-poster.vercel.app', 'http://localhost'];
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      if (!tab.url) continue;
+      if (!APP_ORIGINS.some(o => tab.url.startsWith(o))) continue;
+      try { chrome.tabs.sendMessage(tab.id, { type: 'VP_STATE_CHANGED' }); } catch (_) {}
+    }
+  } catch (_) {}
+}
+
 // Append a single page result to a job atomically. Each call does a
 // read-modify-write so partial progress survives even if SW is killed
 // later in the run.
@@ -143,6 +157,7 @@ async function appendPageResult(jobId, pageResult, opts) {
     return merged;
   });
   await chrome.storage.local.set({ scheduled_jobs: next });
+  broadcastStateChanged();
 }
 
 // ───────── Story upload core — used by alarm + recovery + manual retry.
@@ -237,6 +252,7 @@ async function fireStoryJob(jobId) {
       // Only delete blob if all pages succeeded — keep for retry otherwise
       const allOk = results.every(r => r.ok) && alreadyDone.size + results.length >= rec.pages.length;
       if (allOk) await idbDel(`story_${jobId}`);
+      broadcastStateChanged();
     } catch (e) {
       await logEvent('story_fire', 'save_err', { jobId, err: e.message });
     }
@@ -560,6 +576,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
           const cur = (await chrome.storage.local.get('scheduled_jobs')).scheduled_jobs || [];
           cur.push(req.job);
           await chrome.storage.local.set({ scheduled_jobs: cur });
+          broadcastStateChanged();
           sendResponse({ ok: true });
           break;
         }
@@ -579,6 +596,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
           // Best-effort: clean up any pending story alarm + blob
           try { await chrome.alarms.clear(`story_${req.id}`); } catch (_) {}
           try { await idbDel(`story_${req.id}`); } catch (_) {}
+          broadcastStateChanged();
           sendResponse({ ok: true });
           break;
         }
@@ -696,6 +714,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
             await logEvent('clear_jobs', 'idb_error', { err: e.message });
           }
           await logEvent('clear_jobs', 'done', { jobsCleared: cur.length, blobsCleared: cleared });
+          broadcastStateChanged();
           sendResponse({ ok: true, jobsCleared: cur.length, blobsCleared: cleared });
           break;
         }
