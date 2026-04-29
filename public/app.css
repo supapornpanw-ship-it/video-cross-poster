@@ -421,4 +421,4 @@ textarea { resize: vertical; min-height: 70px; }
   border-top: 1px solid var(--border);
 }
 .sf-group-header:first-child { border-top: none; }
-.sf-group-header--done { color: var(--muted); }
+.sf-item--done { opacity: 0.5; }

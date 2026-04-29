@@ -1100,7 +1100,7 @@
 
   function sfCaption(j) {
     const raw = (j.caption || '').trim();
-    if (raw) return raw.length > 30 ? raw.slice(0, 28) + '…' : raw;
+    if (raw) return raw.length > 32 ? raw.slice(0, 30) + '…' : raw;
     return '(ไม่มีแคปชั่น)';
   }
 
@@ -1109,53 +1109,77 @@
     const badge = $('schedFloatBadge');
     if (!body) return;
 
-    const pending = jobs.filter(j => {
-      const s = jobOverallStatus(j);
-      return s.cls !== 'sched-status--done' && s.cls !== 'sched-status--error';
-    }).sort((a, b) => (a.fireAt || 0) - (b.fireAt || 0)); // เร็วสุดอยู่บนสุด
-
-    const done = jobs.filter(j => {
-      const s = jobOverallStatus(j);
-      return s.cls === 'sched-status--done' || s.cls === 'sched-status--error';
-    }).sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0)); // ล่าสุดอยู่บนสุดของกลุ่มนี้
-
-    badge.textContent = pending.length;
-    badge.hidden = pending.length === 0;
-
     if (!jobs.length) {
+      badge.hidden = true;
       body.innerHTML = '<div class="muted-sm" style="padding:12px">ยังไม่มีรายการ</div>';
       return;
     }
 
+    const groups = loadGroups(); // from localStorage
+
+    // Match job → group by exact pageIds set
+    function matchGroup(j) {
+      const ids = new Set((j.fbPages || []).map(p => p.id));
+      if (!ids.size) return null;
+      return groups.find(g =>
+        g.pageIds.length === ids.size && g.pageIds.every(id => ids.has(id))
+      ) || null;
+    }
+
+    // Bucket jobs into groups
+    const buckets = new Map(); // groupId|'__other' → { label, jobs[] }
+    for (const g of groups) buckets.set(g.id, { label: g.name, jobs: [] });
+    buckets.set('__other', { label: 'อื่นๆ', jobs: [] });
+
+    for (const j of jobs) {
+      const g = matchGroup(j);
+      const key = g ? g.id : '__other';
+      if (!buckets.has(key)) buckets.set(key, { label: 'อื่นๆ', jobs: [] });
+      buckets.get(key).jobs.push(j);
+    }
+
+    // Badge = total pending across all groups
+    const totalPending = jobs.filter(j => {
+      const s = jobOverallStatus(j);
+      return s.cls !== 'sched-status--done' && s.cls !== 'sched-status--error';
+    }).length;
+    badge.textContent = totalPending;
+    badge.hidden = totalPending === 0;
+
     function sfItem(j) {
       const s = jobOverallStatus(j);
+      const isDone = s.cls === 'sched-status--done' || s.cls === 'sched-status--error';
       const dotCls =
-        s.stuck                            ? 'sf-dot--stuck' :
-        s.cls === 'sched-status--done'     ? 'sf-dot--done'  :
-        s.cls === 'sched-status--error'    ? 'sf-dot--error' :
-        s.label.startsWith('🔄')           ? 'sf-dot--retry' :
-                                             'sf-dot--wait';
+        s.stuck                         ? 'sf-dot--stuck' :
+        s.cls === 'sched-status--done'  ? 'sf-dot--done'  :
+        s.cls === 'sched-status--error' ? 'sf-dot--error' :
+        s.label.startsWith('🔄')        ? 'sf-dot--retry' :
+                                          'sf-dot--wait';
       const timeStr = j.fireAt ? fmtTime(j.fireAt) : 'โพสทันที';
-      const cap = sfCaption(j);
       return `
-        <div class="sf-item">
+        <div class="sf-item${isDone ? ' sf-item--done' : ''}">
           <span class="sf-dot ${dotCls}"></span>
           <div class="sf-info">
-            <div class="sf-name" title="${escHtml(cap)}">${escHtml(cap)}</div>
+            <div class="sf-name">${escHtml(sfCaption(j))}</div>
             <div class="sf-time">${escHtml(timeStr)} · ${escHtml(s.label)}</div>
           </div>
         </div>`;
     }
 
-    const pendingHtml = pending.length ? `
-      <div class="sf-group-header">รอโพส · ${pending.length}</div>
-      ${pending.map(sfItem).join('')}` : '';
-
-    const doneHtml = done.length ? `
-      <div class="sf-group-header sf-group-header--done">โพสแล้ว · ${done.length}</div>
-      ${done.map(sfItem).join('')}` : '';
-
-    body.innerHTML = pendingHtml + doneHtml;
+    let html = '';
+    for (const [, bucket] of buckets) {
+      if (!bucket.jobs.length) continue;
+      // Pending first (ASC by time), done last (DESC by time)
+      const pending = bucket.jobs
+        .filter(j => { const s = jobOverallStatus(j); return s.cls !== 'sched-status--done' && s.cls !== 'sched-status--error'; })
+        .sort((a, b) => (a.fireAt || 0) - (b.fireAt || 0));
+      const done = bucket.jobs
+        .filter(j => { const s = jobOverallStatus(j); return s.cls === 'sched-status--done' || s.cls === 'sched-status--error'; })
+        .sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0));
+      html += `<div class="sf-group-header">${escHtml(bucket.label)}</div>`;
+      html += [...pending, ...done].map(sfItem).join('');
+    }
+    body.innerHTML = html;
   }
 
   async function loadScheduled() {
