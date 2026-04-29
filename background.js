@@ -706,6 +706,33 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
           break;
         }
 
+        case 'FIRE_STORY_NOW': {
+          // Immediate story upload routed through the extension background to avoid
+          // browser CORS restrictions on rupload.facebook.com.
+          const { sessionId: sId, pages: sPages } = req;
+          if (!sId || !Array.isArray(sPages) || !sPages.length) {
+            sendResponse({ ok: false, error: 'missing_fields' }); break;
+          }
+          let sBlob;
+          try { sBlob = await idbGet(`pending_${sId}`); } catch (e) {
+            sendResponse({ ok: false, error: 'idb_error: ' + e.message }); break;
+          }
+          if (!sBlob) { sendResponse({ ok: false, error: 'no_pending_blob' }); break; }
+          try { await idbDel(`pending_${sId}`); } catch (_) {}
+          const sResults = await Promise.all(sPages.map(async (p) => {
+            try {
+              const out = await bgUploadStory(p, sBlob);
+              await logEvent('story_now', 'page_ok', { page: p.name, id: out.id });
+              return { pageId: p.id, pageName: p.name, ok: true, id: out.id };
+            } catch (e) {
+              await logEvent('story_now', 'page_err', { page: p.name, err: e.message });
+              return { pageId: p.id, pageName: p.name, ok: false, error: e.message };
+            }
+          }));
+          sendResponse({ ok: true, results: sResults });
+          break;
+        }
+
         case 'CANCEL_STORY': {
           try { await chrome.alarms.clear(`story_${req.id}`); } catch (_) {}
           try { await idbDel(`story_${req.id}`); } catch (_) {}

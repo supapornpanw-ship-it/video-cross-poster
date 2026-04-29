@@ -706,7 +706,7 @@
     // (background uploads them all when alarm fires, sharing the stored blob).
     const items = [
       ...pages.map(p => ({ label: `Facebook Feed · ${p.name}`, kind: 'fb', page: p })),
-      ...(storyEnable && !scheduledTs ? pages.map(p => ({ label: `Facebook Story · ${p.name}`, kind: 'story', page: p })) : []),
+      ...(storyEnable && !scheduledTs ? [{ label: `Facebook Story · ${pages.length} เพจ`, kind: 'story_now', pages }] : []),
       ...(storyEnable && scheduledTs ? [{ label: `Facebook Story (ตั้งเวลา) · ${pages.length} เพจ`, kind: 'story_sched', pages }] : []),
       ...(ytEnable ? [{ label: `YouTube · ${state.yt.channel ? state.yt.channel.title : 'channel'}`, kind: 'yt' }] : [])
     ];
@@ -723,11 +723,33 @@
           const out = await uploadToFacebook(it.page, state.selectedFile, caption, scheduledTs);
           progressUpdate(i, scheduledTs ? `ตั้งเวลาแล้ว · id ${out.id}` : `สำเร็จ · id ${out.id}`, 'success');
           results.push({ kind: 'fb', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
-        } else if (it.kind === 'story') {
-          // Immediate (no schedule)
-          const out = await uploadStoryToFacebook(it.page, state.selectedFile);
-          progressUpdate(i, `สำเร็จ · story id ${out.id}`, 'success');
-          results.push({ kind: 'story', pageId: it.page.id, pageName: it.page.name, ok: true, id: out.id });
+        } else if (it.kind === 'story_now') {
+          // Immediate story — routed through extension background to avoid CORS on rupload.facebook.com
+          const upload = await uploadBlobToExtensionChunked(state.selectedFile, (frac) => {
+            progressUpdate(i, `กำลังส่งไฟล์... ${Math.round(frac * 100)}%`, 'pending');
+          });
+          progressUpdate(i, `กำลังโพส ${it.pages.length} เพจ...`, 'pending');
+          const r = await sendExt({
+            type: 'FIRE_STORY_NOW',
+            pages: it.pages.map(p => ({ id: p.id, name: p.name, pageToken: p.pageToken })),
+            sessionId: upload.sessionId,
+          }, 300000);
+          if (!r || !r.ok) {
+            progressUpdate(i, 'ผิดพลาด: ' + ((r && r.error) || 'unknown'), 'error');
+            results.push({ kind: 'story', ok: false, error: (r && r.error) || 'unknown' });
+          } else {
+            const okCount = r.results.filter(x => x.ok).length;
+            const errParts = r.results.filter(x => !x.ok).map(x => `${x.pageName}: ${x.error}`);
+            if (errParts.length === 0) {
+              progressUpdate(i, `สำเร็จ · ${okCount} เพจ`, 'success');
+            } else {
+              progressUpdate(i, `${okCount}/${r.results.length} เพจสำเร็จ · ${errParts.join(' · ')}`, 'error');
+            }
+            r.results.forEach(res => results.push({
+              kind: 'story', pageId: res.pageId, pageName: res.pageName,
+              ok: res.ok, id: res.id, error: res.error
+            }));
+          }
         } else if (it.kind === 'story_sched') {
           // Chunked transfer: split file into 16MB pieces, send each as a
           // separate message, then schedule the alarm.
