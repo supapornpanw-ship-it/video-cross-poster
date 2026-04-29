@@ -413,3 +413,12 @@ textarea { resize: vertical; min-height: 70px; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .sf-time { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+.sf-group-header {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #93c5fd;
+  padding: 8px 14px 4px;
+  border-top: 1px solid var(--border);
+}
+.sf-group-header:first-child { border-top: none; }
+.sf-group-header--done { color: var(--muted); }

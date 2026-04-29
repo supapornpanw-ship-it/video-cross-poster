@@ -1098,24 +1098,36 @@
     return blocks.join('');
   }
 
+  function sfCaption(j) {
+    const raw = (j.caption || '').trim();
+    if (raw) return raw.length > 30 ? raw.slice(0, 28) + '…' : raw;
+    return '(ไม่มีแคปชั่น)';
+  }
+
   function renderScheduleFloat(jobs) {
     const body = $('schedFloatBody');
     const badge = $('schedFloatBadge');
     if (!body) return;
-    const upcoming = jobs.filter(j => j.fireAt && !j.storyFiredAt);
-    // Badge shows count of upcoming/pending
-    if (upcoming.length > 0) {
-      badge.textContent = upcoming.length;
-      badge.hidden = false;
-    } else {
-      badge.hidden = true;
-    }
+
+    const pending = jobs.filter(j => {
+      const s = jobOverallStatus(j);
+      return s.cls !== 'sched-status--done' && s.cls !== 'sched-status--error';
+    }).sort((a, b) => (a.fireAt || 0) - (b.fireAt || 0)); // เร็วสุดอยู่บนสุด
+
+    const done = jobs.filter(j => {
+      const s = jobOverallStatus(j);
+      return s.cls === 'sched-status--done' || s.cls === 'sched-status--error';
+    }).sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0)); // ล่าสุดอยู่บนสุดของกลุ่มนี้
+
+    badge.textContent = pending.length;
+    badge.hidden = pending.length === 0;
+
     if (!jobs.length) {
       body.innerHTML = '<div class="muted-sm" style="padding:12px">ยังไม่มีรายการ</div>';
       return;
     }
-    const sorted = jobs.slice().sort((a, b) => (a.fireAt || 0) - (b.fireAt || 0));
-    body.innerHTML = sorted.map(j => {
+
+    function sfItem(j) {
       const s = jobOverallStatus(j);
       const dotCls =
         s.stuck                            ? 'sf-dot--stuck' :
@@ -1123,20 +1135,27 @@
         s.cls === 'sched-status--error'    ? 'sf-dot--error' :
         s.label.startsWith('🔄')           ? 'sf-dot--retry' :
                                              'sf-dot--wait';
-      const name = j.fileName
-        ? j.fileName.replace(/\.[^.]+$/, '')
-        : (j.caption ? j.caption.slice(0, 28) : '(ไม่มีชื่อ)');
       const timeStr = j.fireAt ? fmtTime(j.fireAt) : 'โพสทันที';
-      const pages = (j.fbPages || []).map(p => p.name).join(', ') || '';
+      const cap = sfCaption(j);
       return `
         <div class="sf-item">
           <span class="sf-dot ${dotCls}"></span>
           <div class="sf-info">
-            <div class="sf-name" title="${escHtml(name)}">${escHtml(name)}</div>
-            <div class="sf-time">${escHtml(timeStr)}${pages ? ' · ' + escHtml(pages) : ''}</div>
+            <div class="sf-name" title="${escHtml(cap)}">${escHtml(cap)}</div>
+            <div class="sf-time">${escHtml(timeStr)} · ${escHtml(s.label)}</div>
           </div>
         </div>`;
-    }).join('');
+    }
+
+    const pendingHtml = pending.length ? `
+      <div class="sf-group-header">รอโพส · ${pending.length}</div>
+      ${pending.map(sfItem).join('')}` : '';
+
+    const doneHtml = done.length ? `
+      <div class="sf-group-header sf-group-header--done">โพสแล้ว · ${done.length}</div>
+      ${done.map(sfItem).join('')}` : '';
+
+    body.innerHTML = pendingHtml + doneHtml;
   }
 
   async function loadScheduled() {
