@@ -421,4 +421,5 @@ textarea { resize: vertical; min-height: 70px; }
   border-top: 1px solid var(--border);
 }
 .sf-group-header:first-child { border-top: none; }
+.sf-group-pages { font-size: 10px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 2px; }
 .sf-item--done { opacity: 0.5; }

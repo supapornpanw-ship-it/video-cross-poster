@@ -1176,7 +1176,14 @@
       const done = bucket.jobs
         .filter(j => { const s = jobOverallStatus(j); return s.cls === 'sched-status--done' || s.cls === 'sched-status--error'; })
         .sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0));
-      html += `<div class="sf-group-header">${escHtml(bucket.label)}</div>`;
+      const groupDef = groups.find(g => g.name === bucket.label);
+      const pageNames = groupDef
+        ? state.fb.pages.filter(p => groupDef.pageIds.includes(p.id)).map(p => p.name).join(', ')
+        : '';
+      html += `<div class="sf-group-header">
+        ${escHtml(bucket.label)}
+        ${pageNames ? `<div class="sf-group-pages">${escHtml(pageNames)}</div>` : ''}
+      </div>`;
       html += [...pending, ...done].map(sfItem).join('');
     }
     body.innerHTML = html;
