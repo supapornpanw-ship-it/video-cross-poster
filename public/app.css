@@ -421,5 +421,10 @@ textarea { resize: vertical; min-height: 70px; }
   border-top: 1px solid var(--border);
 }
 .sf-group-header:first-child { border-top: none; }
+.sf-group-toggle { cursor: pointer; user-select: none; }
+.sf-group-toggle:hover { background: rgba(255,255,255,0.04); }
+.sf-group-title-row { display: flex; justify-content: space-between; align-items: center; }
+.sf-chevron { font-size: 9px; color: var(--muted); }
 .sf-group-pages { font-size: 10px; color: var(--muted); font-weight: 400; text-transform: none; letter-spacing: 0; margin-top: 2px; }
+.sf-group-body--hidden { display: none; }
 .sf-item--done { opacity: 0.5; }

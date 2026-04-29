@@ -1166,21 +1166,43 @@
         </div>`;
     }
 
+    const COLLAPSED_KEY = 'vp_float_collapsed';
+    let collapsed;
+    try { collapsed = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]')); }
+    catch (_) { collapsed = new Set(); }
+
     let html = '';
-    for (const [, bucket] of buckets) {
+    for (const [bucketKey, bucket] of buckets) {
       if (!bucket.jobs.length) continue;
       const sorted = bucket.jobs.slice().sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0));
       const groupDef = groups.find(g => g.name === bucket.label);
       const pageNames = groupDef
         ? state.fb.pages.filter(p => groupDef.pageIds.includes(p.id)).map(p => p.name).join(', ')
         : '';
-      html += `<div class="sf-group-header">
-        ${escHtml(bucket.label)}
-        ${pageNames ? `<div class="sf-group-pages">${escHtml(pageNames)}</div>` : ''}
-      </div>`;
-      html += sorted.map(sfItem).join('');
+      const isCollapsed = collapsed.has(bucketKey);
+      html += `
+        <div class="sf-group-header sf-group-toggle" data-gkey="${escHtml(bucketKey)}">
+          <div class="sf-group-title-row">
+            <span>${escHtml(bucket.label)}</span>
+            <span class="sf-chevron">${isCollapsed ? '▶' : '▼'}</span>
+          </div>
+          ${pageNames ? `<div class="sf-group-pages">${escHtml(pageNames)}</div>` : ''}
+        </div>
+        <div class="sf-group-body${isCollapsed ? ' sf-group-body--hidden' : ''}">
+          ${sorted.map(sfItem).join('')}
+        </div>`;
     }
     body.innerHTML = html;
+
+    body.querySelectorAll('.sf-group-toggle').forEach(el => {
+      el.addEventListener('click', () => {
+        const key = el.dataset.gkey;
+        if (collapsed.has(key)) collapsed.delete(key);
+        else collapsed.add(key);
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+        renderScheduleFloat(jobs);
+      });
+    });
   }
 
   async function loadScheduled() {
