@@ -160,6 +160,11 @@ textarea { resize: vertical; min-height: 70px; }
   transition: border-color 0.15s;
 }
 .group-chip:hover { border-color: var(--primary); }
+.group-chip--active {
+  border-color: var(--primary);
+  background: rgba(59,130,246,0.15);
+}
+.group-chip--active .group-chip-name { color: var(--primary); }
 .group-chip-name {
   cursor: pointer; font-weight: 500;
 }

@@ -491,6 +491,23 @@
     document.querySelectorAll('#pageList input[type="checkbox"]').forEach(c => {
       c.checked = ids.has(c.dataset.pid);
     });
+    syncGroupHighlight();
+  }
+
+  // Highlight the chip whose pageIds exactly match the current checkbox selection.
+  function syncGroupHighlight() {
+    const checks = document.querySelectorAll('#pageList input[type="checkbox"]');
+    const selected = new Set();
+    checks.forEach(c => { if (c.checked) selected.add(c.dataset.pid); });
+    const groups = loadGroups();
+    document.querySelectorAll('.group-chip').forEach(chip => {
+      const gid = chip.querySelector('[data-gapply]')?.dataset.gapply;
+      const g = groups.find(x => x.id === gid);
+      if (!g) return;
+      const match = g.pageIds.length === selected.size &&
+        g.pageIds.every(id => selected.has(id));
+      chip.classList.toggle('group-chip--active', match);
+    });
   }
   function renderGroups() {
     const wrap = $('pageGroups');
@@ -536,6 +553,9 @@
         <span class="page-id">${escHtml(p.category || '')}</span>
       </label>
     `).join('');
+    wrap.querySelectorAll('input[type="checkbox"]').forEach(c => {
+      c.addEventListener('change', syncGroupHighlight);
+    });
     acts.hidden = false;
     renderGroups();
   }
@@ -1364,9 +1384,11 @@
 
     $('selectAll').addEventListener('click', () => {
       document.querySelectorAll('#pageList input[type="checkbox"]').forEach(c => c.checked = true);
+      syncGroupHighlight();
     });
     $('selectNone').addEventListener('click', () => {
       document.querySelectorAll('#pageList input[type="checkbox"]').forEach(c => c.checked = false);
+      syncGroupHighlight();
     });
     $('saveGroupBtn').addEventListener('click', () => {
       const selected = selectedPages();
