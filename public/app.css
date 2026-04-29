@@ -148,6 +148,29 @@ textarea { resize: vertical; min-height: 70px; }
   display: flex; gap: 8px; margin-top: 8px;
 }
 
+.page-groups {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 8px;
+}
+.group-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px 4px 12px;
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+.group-chip:hover { border-color: var(--primary); }
+.group-chip-name {
+  cursor: pointer; font-weight: 500;
+}
+.group-chip-name:hover { color: var(--primary); }
+.group-chip-count { color: var(--muted); font-size: 11px; }
+.group-chip-del {
+  color: var(--muted); font-size: 14px; cursor: pointer;
+  line-height: 1; padding: 0 2px; margin-left: 1px;
+}
+.group-chip-del:hover { color: var(--danger); }
+
 .action-bar {
   display: flex; gap: 10px; margin-top: 12px;
   flex-wrap: wrap;

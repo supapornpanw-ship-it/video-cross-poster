@@ -478,6 +478,48 @@
     }
   }
 
+  // ───────── Page groups (localStorage)
+  const GROUPS_KEY = 'vp_page_groups';
+  function loadGroups() {
+    try { return JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]'); } catch (_) { return []; }
+  }
+  function saveGroups(groups) {
+    localStorage.setItem(GROUPS_KEY, JSON.stringify(groups));
+  }
+  function applyGroup(group) {
+    const ids = new Set(group.pageIds);
+    document.querySelectorAll('#pageList input[type="checkbox"]').forEach(c => {
+      c.checked = ids.has(c.dataset.pid);
+    });
+  }
+  function renderGroups() {
+    const wrap = $('pageGroups');
+    const groups = loadGroups();
+    if (!state.fb.pages.length || !groups.length) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    wrap.innerHTML = groups.map(g => `
+      <span class="group-chip">
+        <span class="group-chip-name" data-gapply="${escHtml(g.id)}">${escHtml(g.name)}</span>
+        <span class="group-chip-count">${g.pageIds.length} เพจ</span>
+        <span class="group-chip-del" data-gdel="${escHtml(g.id)}" title="ลบกลุ่ม">×</span>
+      </span>
+    `).join('');
+    wrap.querySelectorAll('[data-gapply]').forEach(el => {
+      el.addEventListener('click', () => {
+        const g = loadGroups().find(x => x.id === el.dataset.gapply);
+        if (g) applyGroup(g);
+      });
+    });
+    wrap.querySelectorAll('[data-gdel]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!confirm('ลบกลุ่มนี้?')) return;
+        saveGroups(loadGroups().filter(x => x.id !== el.dataset.gdel));
+        renderGroups();
+      });
+    });
+  }
+
   // ───────── Render: page list
   function renderPageList() {
     const wrap = $('pageList');
@@ -495,6 +537,7 @@
       </label>
     `).join('');
     acts.hidden = false;
+    renderGroups();
   }
 
   function selectedPages() {
@@ -1324,6 +1367,24 @@
     });
     $('selectNone').addEventListener('click', () => {
       document.querySelectorAll('#pageList input[type="checkbox"]').forEach(c => c.checked = false);
+    });
+    $('saveGroupBtn').addEventListener('click', () => {
+      const selected = selectedPages();
+      if (!selected.length) return alert('เลือกเพจก่อนบันทึกกลุ่ม');
+      const name = prompt('ชื่อกลุ่ม:');
+      if (!name || !name.trim()) return;
+      const trimmed = name.trim();
+      const groups = loadGroups();
+      const existing = groups.find(g => g.name === trimmed);
+      if (existing) {
+        if (!confirm(`อัปเดตกลุ่ม "${trimmed}" (${existing.pageIds.length} → ${selected.length} เพจ)?`)) return;
+        existing.pageIds = selected.map(p => p.id);
+        saveGroups(groups);
+      } else {
+        groups.push({ id: 'grp_' + uid(), name: trimmed, pageIds: selected.map(p => p.id) });
+        saveGroups(groups);
+      }
+      renderGroups();
     });
 
     $('postBtn').addEventListener('click', postClip);
