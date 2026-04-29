@@ -1172,7 +1172,7 @@
       // Pending first (ASC by time), done last (DESC by time)
       const pending = bucket.jobs
         .filter(j => { const s = jobOverallStatus(j); return s.cls !== 'sched-status--done' && s.cls !== 'sched-status--error'; })
-        .sort((a, b) => (a.fireAt || 0) - (b.fireAt || 0));
+        .sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0));
       const done = bucket.jobs
         .filter(j => { const s = jobOverallStatus(j); return s.cls === 'sched-status--done' || s.cls === 'sched-status--error'; })
         .sort((a, b) => (b.fireAt || 0) - (a.fireAt || 0));
