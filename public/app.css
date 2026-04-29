@@ -345,3 +345,71 @@ textarea { resize: vertical; min-height: 70px; }
 .manual-tab:hover { color: var(--text); }
 
 .foot { text-align: center; padding-top: 20px; }
+
+/* ── Floating schedule panel ── */
+.sched-float-toggle {
+  position: fixed; left: 16px; top: 50%;
+  transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 8px;
+  cursor: pointer; z-index: 98;
+  color: var(--text);
+  transition: border-color 0.15s, background 0.15s;
+}
+.sched-float-toggle:hover { border-color: var(--primary); background: var(--panel-2); }
+.sched-float-toggle-icon { font-size: 18px; }
+.sched-float-badge {
+  background: var(--primary); color: #fff;
+  font-size: 11px; font-weight: 700;
+  border-radius: 999px; padding: 1px 6px;
+  min-width: 18px; text-align: center;
+}
+
+.sched-float {
+  position: fixed; left: 16px; top: 50%;
+  transform: translateY(-50%);
+  width: 272px; max-height: 72vh;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; z-index: 99;
+  display: flex; flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.sched-float-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sched-float-title { font-weight: 600; font-size: 14px; }
+.sched-float-close {
+  background: none; border: none; color: var(--muted);
+  font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.sched-float-close:hover { color: var(--text); }
+.sched-float-body {
+  overflow-y: auto; flex: 1;
+  padding: 6px 0;
+}
+
+.sf-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 14px; cursor: default;
+  transition: background 0.1s;
+}
+.sf-item:hover { background: rgba(255,255,255,0.03); }
+.sf-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  margin-top: 4px;
+}
+.sf-dot--wait  { background: #93c5fd; }
+.sf-dot--done  { background: #6ee7b7; }
+.sf-dot--error { background: #fca5a5; }
+.sf-dot--stuck { background: #fbbf24; }
+.sf-dot--retry { background: #fb923c; }
+.sf-info { flex: 1; min-width: 0; }
+.sf-name {
+  font-size: 13px; font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sf-time { font-size: 11px; color: var(--muted); margin-top: 1px; }

@@ -234,6 +234,21 @@
     </footer>
   </main>
 
+  <!-- Floating schedule panel -->
+  <button id="schedFloatToggle" class="sched-float-toggle" title="รายการตั้งเวลา" type="button">
+    <span class="sched-float-toggle-icon">📋</span>
+    <span id="schedFloatBadge" class="sched-float-badge" hidden></span>
+  </button>
+  <div id="schedFloat" class="sched-float" hidden>
+    <div class="sched-float-header">
+      <span class="sched-float-title">📋 รายการตั้งเวลา</span>
+      <button id="schedFloatClose" class="sched-float-close" type="button">×</button>
+    </div>
+    <div id="schedFloatBody" class="sched-float-body">
+      <div class="muted-sm" style="padding:12px">ยังไม่มีรายการ</div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

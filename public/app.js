@@ -1098,10 +1098,52 @@
     return blocks.join('');
   }
 
+  function renderScheduleFloat(jobs) {
+    const body = $('schedFloatBody');
+    const badge = $('schedFloatBadge');
+    if (!body) return;
+    const upcoming = jobs.filter(j => j.fireAt && !j.storyFiredAt);
+    // Badge shows count of upcoming/pending
+    if (upcoming.length > 0) {
+      badge.textContent = upcoming.length;
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+    if (!jobs.length) {
+      body.innerHTML = '<div class="muted-sm" style="padding:12px">ยังไม่มีรายการ</div>';
+      return;
+    }
+    const sorted = jobs.slice().sort((a, b) => (a.fireAt || 0) - (b.fireAt || 0));
+    body.innerHTML = sorted.map(j => {
+      const s = jobOverallStatus(j);
+      const dotCls =
+        s.stuck                            ? 'sf-dot--stuck' :
+        s.cls === 'sched-status--done'     ? 'sf-dot--done'  :
+        s.cls === 'sched-status--error'    ? 'sf-dot--error' :
+        s.label.startsWith('🔄')           ? 'sf-dot--retry' :
+                                             'sf-dot--wait';
+      const name = j.fileName
+        ? j.fileName.replace(/\.[^.]+$/, '')
+        : (j.caption ? j.caption.slice(0, 28) : '(ไม่มีชื่อ)');
+      const timeStr = j.fireAt ? fmtTime(j.fireAt) : 'โพสทันที';
+      const pages = (j.fbPages || []).map(p => p.name).join(', ') || '';
+      return `
+        <div class="sf-item">
+          <span class="sf-dot ${dotCls}"></span>
+          <div class="sf-info">
+            <div class="sf-name" title="${escHtml(name)}">${escHtml(name)}</div>
+            <div class="sf-time">${escHtml(timeStr)}${pages ? ' · ' + escHtml(pages) : ''}</div>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
   async function loadScheduled() {
     const r = await sendExt({ type: 'GET_STATE' });
     if (!r.ok) return;
     const jobs = (r.state.scheduledJobs || []).slice().sort((a, b) => b.createdAt - a.createdAt);
+    renderScheduleFloat(jobs);
     const wrap = $('scheduledList');
     if (!jobs.length) {
       wrap.innerHTML = '<div class="muted-sm">ยังไม่มีรายการ</div>';
@@ -1411,6 +1453,18 @@
 
     $('postBtn').addEventListener('click', postClip);
     $('resetBtn').addEventListener('click', resetForm);
+    // Floating schedule panel toggle
+    const FLOAT_KEY = 'vp_float_open';
+    function setFloatVisible(v) {
+      $('schedFloat').hidden = !v;
+      $('schedFloatToggle').hidden = v;
+      localStorage.setItem(FLOAT_KEY, v ? '1' : '');
+    }
+    $('schedFloatToggle').addEventListener('click', () => setFloatVisible(true));
+    $('schedFloatClose').addEventListener('click', () => setFloatVisible(false));
+    // Restore last state
+    if (localStorage.getItem(FLOAT_KEY)) setFloatVisible(true);
+
     $('refreshSched').addEventListener('click', loadScheduled);
     $('clearSched').addEventListener('click', async () => {
       if (!confirm('ล้างรายการทั้งหมด?')) return;
